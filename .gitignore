@@ -27,6 +27,10 @@ ssis/obj/
 # Publish it to the Power BI service, or save it as a .pbip project to version it.
 *.pbix
 
+# Local working notes (kept out of the repo)
+CLAUDE.md
+docs/PLAN.md
+
 # OS / misc
 *.lnk
 Thumbs.db
