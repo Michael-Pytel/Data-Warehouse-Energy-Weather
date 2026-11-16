@@ -4,9 +4,12 @@ Klient API do komunikacji z ENTSO-E Transparency Platform
 Pobiera dane o zużyciu energii i generacji wg typów źródeł
 """
 
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
+import zones
 from datetime import datetime, timedelta
 import time
 import logging
@@ -39,36 +42,7 @@ class ENTSOEClient:
         self.logger.info(f"Initializing ENTSOEClient with connection to {self.base_url}")
         
         # Mapowanie stref przetargowych
-        self.bidding_zones = {
-            '10YAT-APG------L': {'name': 'Austria', 'country': 'AT', 'timezone': 'Europe/Vienna'},
-            '10YBE----------2': {'name': 'Belgium', 'country': 'BE', 'timezone': 'Europe/Brussels'},
-            '10YBG-ESO------M': {'name': 'Bulgaria', 'country': 'BG', 'timezone': 'Europe/Sofia'},
-            '10YHR-HEP------M': {'name': 'Croatia', 'country': 'HR', 'timezone': 'Europe/Zagreb'},
-            '10YCY-1001A0003J': {'name': 'Cyprus', 'country': 'CY', 'timezone': 'Asia/Nicosia'},
-            '10YCZ-CEPS-----N': {'name': 'Czech Republic', 'country': 'CZ', 'timezone': 'Europe/Prague'},
-            '10Y1001A1001A65H': {'name': 'Denmark East (DK1)', 'country': 'DK', 'timezone': 'Europe/Copenhagen'},
-            '10Y1001A1001A39I': {'name': 'Denmark West (DK2)', 'country': 'DK', 'timezone': 'Europe/Copenhagen'},
-            '10Y1001A1001A44P': {'name': 'Estonia', 'country': 'EE', 'timezone': 'Europe/Tallinn'},
-            '10YFI-1--------U': {'name': 'Finland', 'country': 'FI', 'timezone': 'Europe/Helsinki'},
-            '10YFR-RTE------C': {'name': 'France', 'country': 'FR', 'timezone': 'Europe/Paris'},
-            '10Y1001A1001A83F': {'name': 'Germany', 'country': 'DE', 'timezone': 'Europe/Berlin'},
-            '10YGR-HTSO-----Y': {'name': 'Greece', 'country': 'GR', 'timezone': 'Europe/Athens'},
-            '10YHU-MAVIR----U': {'name': 'Hungary', 'country': 'HU', 'timezone': 'Europe/Budapest'},
-            '10Y1001A1001A59C': {'name': 'Ireland', 'country': 'IE', 'timezone': 'Europe/Dublin'},
-            '10YIT-GRTN-----B': {'name': 'Italy', 'country': 'IT', 'timezone': 'Europe/Rome'},
-            '10YLV-1001A00074': {'name': 'Latvia', 'country': 'LV', 'timezone': 'Europe/Riga'},
-            '10YLT-1001A0008Q': {'name': 'Lithuania', 'country': 'LT', 'timezone': 'Europe/Vilnius'},
-            '10YLU-CEGEDEL-NQ': {'name': 'Luxembourg', 'country': 'LU', 'timezone': 'Europe/Luxembourg'},
-            '10Y1001A1001A93C': {'name': 'Malta', 'country': 'MT', 'timezone': 'Europe/Malta'},
-            '10YNL----------L': {'name': 'Netherlands', 'country': 'NL', 'timezone': 'Europe/Amsterdam'},
-            '10YPL-AREA-----S': {'name': 'Poland', 'country': 'PL', 'timezone': 'Europe/Warsaw'},
-            '10YPT-REN------W': {'name': 'Portugal', 'country': 'PT', 'timezone': 'Europe/Lisbon'},
-            '10YRO-TEL------P': {'name': 'Romania', 'country': 'RO', 'timezone': 'Europe/Bucharest'},
-            '10YSK-SEPS-----K': {'name': 'Slovakia', 'country': 'SK', 'timezone': 'Europe/Bratislava'},
-            '10YSI-ELES-----O': {'name': 'Slovenia', 'country': 'SI', 'timezone': 'Europe/Ljubljana'},
-            '10YES-REE------0': {'name': 'Spain', 'country': 'ES', 'timezone': 'Europe/Madrid'},
-            '10YSE-1--------K': {'name': 'Sweden', 'country': 'SE', 'timezone': 'Europe/Stockholm'}
-        }
+        self.bidding_zones = zones.bidding_zones()
         
         # Mapowanie typów generacji
         self.generation_types = {
@@ -124,6 +98,33 @@ class ENTSOEClient:
                     
         return None
     
+    @staticmethod
+    def _resolution_to_timedelta(resolution: str) -> timedelta:
+        """Convert an ISO 8601 resolution such as PT15M, PT60M or PT1H to a timedelta."""
+        match = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?", (resolution or "").strip())
+        if not match or not any(match.groups()):
+            return timedelta(hours=1)
+        hours, minutes = (int(g) if g else 0 for g in match.groups())
+        return timedelta(hours=hours, minutes=minutes)
+
+    @staticmethod
+    def _aggregate_to_hourly(records: List[Dict]) -> List[Dict]:
+        """
+        Average sub-hourly points (e.g. 15-minute MW values) to hourly values.
+        The warehouse works at hourly grain; for power in MW the hourly mean is the correct value.
+        """
+        if not records:
+            return records
+        buckets: Dict[tuple, List[float]] = {}
+        meta: Dict[tuple, Dict] = {}
+        for record in records:
+            hour = record['timestamp'].replace(minute=0, second=0, microsecond=0)
+            key = (hour, record.get('bidding_zone'), record.get('generation_type'))
+            buckets.setdefault(key, []).append(record['quantity'])
+            meta.setdefault(key, {k: v for k, v in record.items() if k not in ('timestamp', 'quantity')})
+        return [dict(meta[key], timestamp=key[0], quantity=sum(values) / len(values))
+                for key, values in sorted(buckets.items(), key=lambda kv: kv[0][0])]
+
     def _parse_xml_response(self, xml_content: str) -> List[Dict]:
         """
         Parsowanie odpowiedzi XML do listy słowników
@@ -209,7 +210,18 @@ class ENTSOEClient:
                 if psr_type_elem is not None:
                     generation_type = psr_type_elem.text
                     self.logger.info(f"TimeSeries {ts_idx} - Generation type: {generation_type}")
-                
+
+                    # Generation documents carry two series per type: production (inBiddingZone_Domain)
+                    # and consumption, e.g. pumped-storage pumping (outBiddingZone_Domain).
+                    # Only production belongs in the generation table.
+                    in_zone = (timeseries.find(".//ns:inBiddingZone_Domain.mRID", namespaces) if namespace
+                               else timeseries.find(".//inBiddingZone_Domain.mRID"))
+                    if in_zone is None and bidding_zone_elem is not None:
+                        self.logger.debug(f"TimeSeries {ts_idx} - skipping consumption series for {generation_type}")
+                        continue
+                    if in_zone is not None:
+                        bidding_zone = in_zone.text
+
                 # Pobierz okres czasu
                 if namespace:
                     period_elements = timeseries.findall(".//ns:Period", namespaces)
@@ -233,51 +245,60 @@ class ENTSOEClient:
                     start_time_text = start_time_elem.text
                     self.logger.info(f"Period {period_idx} - Start time: {start_time_text}")
                     
-                    # Konwersja czasu UTC na datetime
+                    # Convert UTC start time to datetime
                     start_datetime = datetime.fromisoformat(start_time_text.replace('Z', '+00:00'))
-                    
-                    # Pobierz punkty danych
+
+                    # Resolution of this period (PT15M, PT30M, PT60M, ...); ENTSO-E mixes them by country
+                    find = (lambda el, tag: el.find(f".//ns:{tag}", namespaces)) if namespace else (lambda el, tag: el.find(f".//{tag}"))
+                    resolution_elem = find(period, "resolution")
+                    step = self._resolution_to_timedelta(resolution_elem.text if resolution_elem is not None else "PT60M")
+                    end_time_elem = find(period, "end")
+                    end_datetime = (datetime.fromisoformat(end_time_elem.text.replace('Z', '+00:00'))
+                                    if end_time_elem is not None else None)
+                    curve_elem = find(timeseries, "curveType")
+                    curve_type = curve_elem.text if curve_elem is not None else "A01"
+
+                    # Collect points
                     if namespace:
                         point_elements = period.findall(".//ns:Point", namespaces)
                     else:
                         point_elements = period.findall(".//Point")
-                    
-                    self.logger.info(f"Period {period_idx} has {len(point_elements)} Point elements")
-                    
-                    # Przetwarzanie każdego punktu
+
+                    self.logger.info(f"Period {period_idx} has {len(point_elements)} Point elements, resolution {step}")
+
+                    points = {}
                     for point in point_elements:
-                        # Pobierz pozycję i ilość
-                        if namespace:
-                            position_elem = point.find(".//ns:position", namespaces)
-                            quantity_elem = point.find(".//ns:quantity", namespaces)
-                        else:
-                            position_elem = point.find("position")
-                            quantity_elem = point.find("quantity")
-                        
+                        position_elem = find(point, "position")
+                        quantity_elem = find(point, "quantity")
                         if position_elem is not None and quantity_elem is not None:
-                            position = int(position_elem.text)
-                            quantity = float(quantity_elem.text)
-                            
-                            # Obliczenie czasu dla punktu
-                            point_time = start_datetime + timedelta(hours=position - 1)
-                            
-                            # Stwórz rekord danych
-                            record = {
-                                'timestamp': point_time,
-                                'quantity': quantity
-                            }
-                            
-                            # Dodaj strefę przetargową, jeśli dostępna
-                            if bidding_zone:
-                                record['bidding_zone'] = bidding_zone
-                            
-                            # Dodaj typ generacji, jeśli dostępny
-                            if generation_type:
-                                record['generation_type'] = generation_type
-                            
-                            data.append(record)
-            
-            self.logger.info(f"Parsed {len(data)} data points from XML")
+                            points[int(position_elem.text)] = float(quantity_elem.text)
+
+                    if not points:
+                        continue
+
+                    # A03 curves omit positions whose value repeats the previous one: fill them forward
+                    if curve_type == "A03" and end_datetime is not None:
+                        n_positions = int((end_datetime - start_datetime) / step)
+                        last = None
+                        for pos in range(1, n_positions + 1):
+                            if pos in points:
+                                last = points[pos]
+                            elif last is not None:
+                                points[pos] = last
+
+                    for position, quantity in sorted(points.items()):
+                        record = {
+                            'timestamp': start_datetime + step * (position - 1),
+                            'quantity': quantity
+                        }
+                        if bidding_zone:
+                            record['bidding_zone'] = bidding_zone
+                        if generation_type:
+                            record['generation_type'] = generation_type
+                        data.append(record)
+
+            data = self._aggregate_to_hourly(data)
+            self.logger.info(f"Parsed {len(data)} hourly data points from XML")
             return data
             
         except ET.ParseError as e:
@@ -482,51 +503,47 @@ class ENTSOEClient:
         }
         
         total_zones = len(self.bidding_zones)
-        processed_zones = 0
-        
+        # ENTSO-E allows 400 requests/minute per token; exceeding it blocks the token for 10 minutes.
+        # A small worker pool keeps us far below that while cutting run time several-fold.
+        max_workers = max(1, int(os.getenv('ENTSOE_MAX_WORKERS', '8')))
+
+        def fetch_zone(zone_code: str, zone_info: Dict) -> Dict[str, pd.DataFrame]:
+            """Fetch load, generation and forecast for one zone (runs in a worker thread)."""
+            fetchers = {
+                'actual_load': self.get_actual_total_load,
+                'generation': self.get_actual_generation_per_type,
+                'forecast': self.get_day_ahead_forecast,
+            }
+            result = {}
+            for data_type, fetch in fetchers.items():
+                df = fetch(zone_code, start_date, end_date)
+                if df.empty:
+                    self.logger.warning(f"No {data_type} data received for {zone_info['name']} ({zone_code})")
+                    continue
+                df['zone_code'] = zone_code
+                df['zone_name'] = zone_info['name']
+                df['country'] = zone_info['country']
+                result[data_type] = df
+                self.logger.info(f"Got {len(df)} rows of {data_type} data for {zone_info['name']}")
+            return result
+
         try:
-            for zone_code, zone_info in self.bidding_zones.items():
-                self.logger.info(f"Processing zone: {zone_info['name']} ({zone_code})")
-                
-                # Pobieranie danych o zużyciu
-                load_data = self.get_actual_total_load(zone_code, start_date, end_date)
-                if not load_data.empty:
-                    self.logger.info(f"Got {len(load_data)} rows of actual load data for {zone_code}")
-                    load_data['zone_code'] = zone_code
-                    load_data['zone_name'] = zone_info['name']
-                    load_data['country'] = zone_info['country']
-                    all_data['actual_load'].append(load_data)
-                else:
-                    self.logger.warning(f"No actual load data received for {zone_code}")
-                
-                # Pobieranie danych o generacji
-                gen_data = self.get_actual_generation_per_type(zone_code, start_date, end_date)
-                if not gen_data.empty:
-                    self.logger.info(f"Got {len(gen_data)} rows of generation data for {zone_code}")
-                    gen_data['zone_code'] = zone_code
-                    gen_data['zone_name'] = zone_info['name']
-                    gen_data['country'] = zone_info['country']
-                    all_data['generation'].append(gen_data)
-                else:
-                    self.logger.warning(f"No generation data received for {zone_code}")
-                
-                # Pobieranie prognoz
-                forecast_data = self.get_day_ahead_forecast(zone_code, start_date, end_date)
-                if not forecast_data.empty:
-                    self.logger.info(f"Got {len(forecast_data)} rows of forecast data for {zone_code}")
-                    forecast_data['zone_code'] = zone_code
-                    forecast_data['zone_name'] = zone_info['name']
-                    forecast_data['country'] = zone_info['country']
-                    all_data['forecast'].append(forecast_data)
-                else:
-                    self.logger.warning(f"No forecast data received for {zone_code}")
-                
-                processed_zones += 1
-                self.logger.info(f"Processed {processed_zones}/{total_zones} zones")
-                
-                # Przerwa między zapytaniami aby nie przekroczyć limitów API
-                time.sleep(1)
-            
+            self.logger.info(f"Fetching {total_zones} zones with {max_workers} parallel workers")
+            results = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(fetch_zone, code, info): code
+                           for code, info in self.bidding_zones.items()}
+                for done, future in enumerate(as_completed(futures), 1):
+                    zone_code = futures[future]
+                    results[zone_code] = future.result()
+                    self.logger.info(f"Processed {done}/{total_zones} zones "
+                                     f"({self.bidding_zones[zone_code]['name']})")
+
+            # Collect in the original zone order so output is deterministic
+            for zone_code in self.bidding_zones:
+                for data_type, df in results.get(zone_code, {}).items():
+                    all_data[data_type].append(df)
+
             # Łączenie danych
             final_data = {}
             total_records = 0
@@ -834,7 +851,12 @@ def main():
     
     if not connection_string:
         connection_string = os.getenv('DW_CONNECTION_STRING', '')
-    
+
+    if not connection_string:
+        # Same default as the other ETL scripts
+        connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;"
+        logger.info("Using default local connection string")
+
     # Sprawdzenie czy wymagane argumenty są dostępne
     if not token:
         logger.error("ENTSO-E API token is missing. Provide --token argument or set ENTSO_TOKEN environment variable")
