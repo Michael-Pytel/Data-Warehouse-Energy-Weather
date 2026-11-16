@@ -15,6 +15,30 @@ import pyodbc
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Parallel requests to the archive API (free tier: 600 calls/minute)
+MAX_WORKERS = 8
+
+# Base temperature for heating/cooling degree days (°C)
+HDD_CDD_BASE_TEMP = 18.0
+
+# WMO weather interpretation codes (Open-Meteo `weather_code`) mapped to the condition types
+# of dim_weather_condition (see dimension_processor.py). Unlisted codes become 'Unknown'.
+WMO_CONDITIONS = {
+    0: 'Clear', 1: 'Clear',                     # clear sky, mainly clear
+    2: 'Partly Cloudy', 3: 'Overcast',
+    45: 'Fog', 48: 'Fog',                       # fog, depositing rime fog
+    51: 'Rain', 53: 'Rain', 55: 'Rain',         # drizzle
+    56: 'Rain', 57: 'Rain',                     # freezing drizzle
+    61: 'Rain', 63: 'Rain', 65: 'Heavy Rain',   # rain: slight, moderate, heavy
+    66: 'Rain', 67: 'Heavy Rain',               # freezing rain
+    71: 'Snow', 73: 'Snow', 75: 'Heavy Snow', 77: 'Snow',   # snow fall, snow grains
+    80: 'Rain', 81: 'Rain', 82: 'Heavy Rain',   # rain showers
+    85: 'Snow', 86: 'Heavy Snow',               # snow showers
+    95: 'Storm', 96: 'Storm', 99: 'Storm',      # thunderstorm (with hail)
+}
+
 
 class OpenMeteoClient:
     """Klient API dla Open-Meteo Weather Service"""
@@ -26,8 +50,8 @@ class OpenMeteoClient:
         Args:
             connection_string: String połączenia z bazą danych
         """
+        # Archive API = real historical weather. (The climate API is model simulation; not used.)
         self.base_url = "https://archive-api.open-meteo.com/v1/archive"
-        self.climate_url = "https://climate-api.open-meteo.com/v1/climate"
         self.connection_string = connection_string
         
         # Konfiguracja logowania
@@ -262,26 +286,25 @@ class OpenMeteoClient:
             }
         }
         
-        # Parametry pogodowe do pobrania
-        self.hourly_params = [
-            'temperature_2m',
-            'relativehumidity_2m', 
-            'precipitation',
-            'windspeed_10m',
-            'winddirection_10m',
-            'pressure_msl',
-            'cloudcover'
-        ]
-        
-        self.daily_params = [
-            'temperature_2m_max',
-            'temperature_2m_min',
-            'temperature_2m_mean',
-            'precipitation_sum',
-            'windspeed_10m_max',
-            'winddirection_10m_dominant',
-            'et0_fao_evapotranspiration'  # Pomocne przy obliczaniu HDD/CDD
-        ]
+        # Open-Meteo hourly variable -> staging column
+        self.hourly_params = {
+            'temperature_2m': 'temperature_avg',
+            'relative_humidity_2m': 'humidity',
+            'precipitation': 'precipitation',
+            'wind_speed_10m': 'wind_speed',
+            'wind_direction_10m': 'wind_direction',
+            'pressure_msl': 'air_pressure',
+            'cloud_cover': 'cloud_cover',
+            'shortwave_radiation': 'solar_radiation',  # W/m², mean of the preceding hour
+            'weather_code': 'weather_code',            # WMO weather interpretation code
+        }
+
+        # Open-Meteo daily variable -> staging column (days are UTC days, see timezone below)
+        self.daily_params = {
+            'temperature_2m_max': 'temperature_max',
+            'temperature_2m_min': 'temperature_min',
+            'temperature_2m_mean': 'temperature_mean',
+        }
     
     def _make_request(self, url: str, params: Dict, max_retries: int = 3) -> Optional[Dict]:
         """
@@ -315,413 +338,118 @@ class OpenMeteoClient:
                     
         return None
     
-    def get_historical_weather(self, latitude: float, longitude: float, 
-                             start_date: datetime, end_date: datetime,
-                             subzone_code: str, subzone_name: str) -> pd.DataFrame:
+    def fetch_location(self, country_code: str, zone_name: str, subzone: Dict,
+                       start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Pobieranie historycznych danych pogodowych dla lokalizacji
-        
-        Args:
-            latitude: Szerokość geograficzna
-            longitude: Długość geograficzna
-            start_date: Data rozpoczęcia
-            end_date: Data zakończenia
-            subzone_code: Kod podstrefy (miasta)
-            subzone_name: Nazwa podstrefy (miasta)
-            
+        Fetch hourly weather and daily temperatures for one city from the archive API
+        (real historical weather) in a single request.
+
+        All timestamps and days are UTC (timezone=GMT), matching the ENTSO-E data.
+
         Returns:
-            DataFrame z danymi pogodowymi
+            (hourly weather DataFrame, daily climate DataFrame); empty DataFrames on failure
         """
         params = {
-            'latitude': latitude,
-            'longitude': longitude,
+            'latitude': subzone['lat'],
+            'longitude': subzone['lon'],
             'start_date': start_date.strftime('%Y-%m-%d'),
             'end_date': end_date.strftime('%Y-%m-%d'),
             'hourly': ','.join(self.hourly_params),
-            'timezone': 'auto'
+            'daily': ','.join(self.daily_params),
+            'timezone': 'GMT',
         }
-        
-        self.logger.info(f"Fetching historical weather for {subzone_name} ({subzone_code})")
-        
+
         response_data = self._make_request(self.base_url, params)
-        if not response_data:
-            self.logger.warning(f"No weather data received for {subzone_name}")
-            return pd.DataFrame()
-        
-        try:
-            # Parsowanie danych godzinowych
-            hourly_data = response_data.get('hourly', {})
-            
-            # Tworzenie DataFrame
-            df_data = {
-                'timestamp': pd.to_datetime(hourly_data.get('time', [])),
-                'latitude': latitude,
-                'longitude': longitude,
-                'subzone_code': subzone_code,
-                'subzone_name': subzone_name
-            }
-            
-            # Mapowanie parametrów pogodowych
-            param_mapping = {
-                'temperature_2m': 'temperature_avg',
-                'relativehumidity_2m': 'humidity',
-                'precipitation': 'precipitation',
-                'windspeed_10m': 'wind_speed',
-                'winddirection_10m': 'wind_direction',
-                'pressure_msl': 'air_pressure',
-                'cloudcover': 'cloud_cover'
-            }
-            
-            for api_param, db_column in param_mapping.items():
-                df_data[db_column] = hourly_data.get(api_param, [])
-            
-            df = pd.DataFrame(df_data)
-            
-            # Obliczanie dodatkowych metryk
-            df = self._calculate_derived_metrics(df)
-            
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"Error parsing weather data for {subzone_name}: {str(e)}")
-            return pd.DataFrame()
-    
-    def get_climate_indices(self, latitude: float, longitude: float,
-                          start_date: datetime, end_date: datetime,
-                          subzone_code: str, subzone_name: str) -> pd.DataFrame:
-        """
-        Pobieranie wskaźników klimatycznych (HDD/CDD)
-        
-        Args:
-            latitude: Szerokość geograficzna
-            longitude: Długość geograficzna
-            start_date: Data rozpoczęcia
-            end_date: Data zakończenia
-            subzone_code: Kod podstrefy (miasta)
-            subzone_name: Nazwa podstrefy (miasta)
-            
-        Returns:
-            DataFrame ze wskaźnikami klimatycznymi
-        """
-        self.logger.info(f"Fetching climate indices for {subzone_name} ({subzone_code})")
-        
-        # Próbujemy bezpośrednio pobrać dane o heating/cooling degree days
-        # Najpierw sprawdźmy czy API weather_forecast obsługuje te parametry
-        try:
-            # Najpierw próbujemy pobrać dane temperaturowe
-            params = {
-                'latitude': latitude,
-                'longitude': longitude,
-                'start_date': start_date.strftime('%Y-%m-%d'),
-                'end_date': end_date.strftime('%Y-%m-%d'),
-                'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean',
-                'timezone': 'auto'
-            }
-            
-            response_data = self._make_request(self.climate_url, params)
-            
-            if not response_data or 'daily' not in response_data:
-                # Jeśli climate_url nie działa, próbujemy z podstawowym URL
-                params = {
-                    'latitude': latitude,
-                    'longitude': longitude,
-                    'start_date': start_date.strftime('%Y-%m-%d'),
-                    'end_date': end_date.strftime('%Y-%m-%d'),
-                    'daily': 'temperature_2m_max,temperature_2m_min,temperature_2m_mean',
-                    'timezone': 'auto'
-                }
-                response_data = self._make_request(self.base_url, params)
-            
-            if not response_data or 'daily' not in response_data:
-                self.logger.warning(f"Failed to retrieve climate data for {subzone_name}")
-                return pd.DataFrame()
-                
-            daily_data = response_data.get('daily', {})
-            
-            # Tworzenie DataFrame
-            df = pd.DataFrame({
-                'date': pd.to_datetime(daily_data.get('time', [])),
-                'temperature_max': daily_data.get('temperature_2m_max', []),
-                'temperature_min': daily_data.get('temperature_2m_min', []),
-                'temperature_mean': daily_data.get('temperature_2m_mean', []),
-                'latitude': latitude,
-                'longitude': longitude,
-                'subzone_code': subzone_code,
-                'subzone_name': subzone_name
-            })
-            
-            # Obliczamy heating_degree_days i cooling_degree_days na podstawie temperatury
-            base_temp = 18.0  # Temperatura bazowa (w °C)
-            
-            # HDD: Suma wartości poniżej temperatury bazowej
-            df['heating_degree_days'] = df['temperature_mean'].apply(
-                lambda x: max(base_temp - x, 0)
-            )
-            
-            # CDD: Suma wartości powyżej temperatury bazowej
-            df['cooling_degree_days'] = df['temperature_mean'].apply(
-                lambda x: max(x - base_temp, 0)
-            )
-            
-            self.logger.info(f"Calculated climate indices for {subzone_name}: HDD and CDD from temperature data")
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"Error processing climate data for {subzone_name}: {str(e)}")
-            return pd.DataFrame()
-    
+        if not response_data or 'hourly' not in response_data or 'daily' not in response_data:
+            self.logger.warning(f"No weather data received for {subzone['name']}")
+            return pd.DataFrame(), pd.DataFrame()
+
+        location = {
+            'latitude': subzone['lat'],
+            'longitude': subzone['lon'],
+            'subzone_code': subzone['subzone_code'],
+            'subzone_name': subzone['name'],
+            'country_code': country_code,
+            'zone_name': zone_name,
+        }
+
+        hourly = response_data['hourly']
+        weather_df = pd.DataFrame({column: hourly.get(api_param) for api_param, column in self.hourly_params.items()})
+        weather_df.insert(0, 'timestamp', pd.to_datetime(hourly['time']))
+        weather_df = weather_df.assign(**location)
+        weather_df = self._calculate_derived_metrics(weather_df)
+
+        daily = response_data['daily']
+        climate_df = pd.DataFrame({column: daily.get(api_param) for api_param, column in self.daily_params.items()})
+        climate_df.insert(0, 'date', pd.to_datetime(daily['time']))
+        climate_df = climate_df.assign(**location)
+        # Degree days from the real daily mean temperature (base 18 °C)
+        climate_df['heating_degree_days'] = (HDD_CDD_BASE_TEMP - climate_df['temperature_mean']).clip(lower=0)
+        climate_df['cooling_degree_days'] = (climate_df['temperature_mean'] - HDD_CDD_BASE_TEMP).clip(lower=0)
+
+        return weather_df, climate_df
+
     def _calculate_derived_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Obliczanie dodatkowych metryk pogodowych
-        
-        Args:
-            df: DataFrame z podstawowymi danymi pogodowymi
-            
-        Returns:
-            DataFrame z dodatkowymi metrykami
-        """
+        """Add the weather condition (from the WMO code) and daily min/max temperature per UTC day."""
         if df.empty:
             return df
-        
-        # Określanie warunków pogodowych na podstawie parametrów
-        conditions = []
-        for _, row in df.iterrows():
-            condition = self._determine_weather_condition(
-                row.get('precipitation', 0),
-                row.get('cloud_cover', 0),
-                row.get('wind_speed', 0),
-                row.get('temperature_avg', 0)
-            )
-            conditions.append(condition)
-        
-        df['weather_condition'] = conditions
-        
-        # Obliczanie temperatury minimalnej i maksymalnej (dziennie)
+
+        df['weather_condition'] = df['weather_code'].map(WMO_CONDITIONS).fillna('Unknown')
+
         df['date'] = df['timestamp'].dt.date
-        daily_temps = df.groupby(['date', 'subzone_code'])['temperature_avg'].agg(['min', 'max']).reset_index()
-        daily_temps.columns = ['date', 'subzone_code', 'temperature_min', 'temperature_max']
-        
-        # Merge z danymi godzinowymi
-        df = df.merge(daily_temps, on=['date', 'subzone_code'], how='left')
-        
-        # Obliczanie promieniowania słonecznego na podstawie zachmurzenia
-        df['solar_radiation'] = (100 - df['cloud_cover']) / 100 * 1000  # Uproszczone
-        
-        return df
-    
-    def _determine_weather_condition(self, precipitation: float, cloud_cover: float,
-                                   wind_speed: float, temperature: float) -> str:
+        daily_temps = df.groupby('date')['temperature_avg'].agg(temperature_min='min', temperature_max='max')
+        return df.merge(daily_temps, left_on='date', right_index=True, how='left')
+
+    def extract_all(self, start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Określanie typu warunków pogodowych
-        
-        Args:
-            precipitation: Opady [mm]
-            cloud_cover: Zachmurzenie [%]
-            wind_speed: Prędkość wiatru [km/h]
-            temperature: Temperatura [°C]
-            
+        Fetch weather and climate data for all cities in parallel.
+
         Returns:
-            Typ warunków pogodowych
+            (weather DataFrame, climate DataFrame)
         """
-        # Sprawdzanie opadów
-        if precipitation > 5:
-            if temperature < 0:
-                return 'Snow'
-            else:
-                return 'Rain'
-        
-        # Sprawdzanie wiatru
-        if wind_speed > 50:
-            return 'Windy'
-        
-        # Sprawdzanie zachmurzenia
-        if cloud_cover < 20:
-            return 'Clear'
-        elif cloud_cover < 50:
-            return 'Partly Cloudy'
-        elif cloud_cover < 80:
-            return 'Cloudy'
-        else:
-            return 'Overcast'
-    
-    def extract_all_weather_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """
-        Ekstrakcja danych pogodowych dla wszystkich stref i podstref UE
-        
-        Args:
-            start_date: Data rozpoczęcia
-            end_date: Data zakończenia
-            
-        Returns:
-            DataFrame z danymi pogodowymi dla wszystkich stref i podstref
-        """
-        self.logger.info(f"Starting weather data extraction for EU countries from {start_date} to {end_date}")
-        
-        # Logowanie rozpoczęcia procesu
+        cities = [(country_code, zone_info['name'], subzone)
+                  for country_code, zone_info in self.weather_locations.items()
+                  for subzone in zone_info['subzones']]
+        self.logger.info(f"Fetching weather for {len(self.weather_locations)} countries, {len(cities)} cities "
+                         f"from {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d} ({MAX_WORKERS} parallel requests)")
+
         try:
             self._log_process('WEATHER_EXTRACTION_EU', 'RUNNING')
         except Exception as e:
             self.logger.warning(f"Error logging process: {str(e)}")
-        
-        all_subzone_data = []
-        total_countries = len(self.weather_locations)
-        processed_countries = 0
-        total_cities = sum(len(zone_info['subzones']) for zone_info in self.weather_locations.values())
-        processed_cities = 0
-        
-        self.logger.info(f"Processing {total_countries} EU countries with {total_cities} cities total")
-        
+
+        weather_parts, climate_parts, failed = [], [], []
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(self.fetch_location, country_code, zone_name, subzone, start_date, end_date): subzone['name']
+                       for country_code, zone_name, subzone in cities}
+            for future in as_completed(futures):
+                city = futures[future]
+                try:
+                    weather_df, climate_df = future.result()
+                except Exception as e:
+                    self.logger.error(f"Error fetching weather for {city}: {str(e)}")
+                    weather_df, climate_df = pd.DataFrame(), pd.DataFrame()
+                if weather_df.empty:
+                    failed.append(city)
+                    continue
+                weather_parts.append(weather_df)
+                climate_parts.append(climate_df)
+
+        if failed:
+            self.logger.warning(f"No data for {len(failed)} cities: {', '.join(sorted(failed))}")
+
+        weather_data = pd.concat(weather_parts, ignore_index=True) if weather_parts else pd.DataFrame()
+        climate_data = pd.concat(climate_parts, ignore_index=True) if climate_parts else pd.DataFrame()
+        self.logger.info(f"Extracted {len(weather_data)} weather and {len(climate_data)} climate records")
+
         try:
-            for country_code, zone_info in self.weather_locations.items():
-                self.logger.info(f"Processing weather for {zone_info['name']} ({country_code}) - {len(zone_info['subzones'])} cities")
-                
-                # Pobieranie danych dla każdej podstrefy (miasta) w strefie
-                for subzone in zone_info['subzones']:
-                    processed_cities += 1
-                    self.logger.info(f"Fetching weather for {subzone['name']} ({subzone['subzone_code']}) - city {processed_cities}/{total_cities}")
-                    
-                    # Dane pogodowe
-                    weather_df = self.get_historical_weather(
-                        subzone['lat'], subzone['lon'], 
-                        start_date, end_date,
-                        subzone['subzone_code'], subzone['name']
-                    )
-                    
-                    if not weather_df.empty:
-                        # Dodanie informacji o strefie
-                        weather_df['country_code'] = country_code
-                        weather_df['zone_name'] = zone_info['name']
-                        all_subzone_data.append(weather_df)
-                        self.logger.info(f"Successfully extracted {len(weather_df)} records for {subzone['name']}")
-                    else:
-                        self.logger.warning(f"No data retrieved for {subzone['name']}")
-                    
-                    # Przerwa między zapytaniami aby nie przekroczyć limitów API
-                    time.sleep(1.0)  # Zwiększona przerwa dla większej liczby miast
-                
-                processed_countries += 1
-                self.logger.info(f"Completed {zone_info['name']} - processed {processed_countries}/{total_countries} countries")
-                
-                # Dodatkowa przerwa między krajami
-                time.sleep(2.0)
-            
-            # Łączenie wszystkich danych
-            if all_subzone_data:
-                final_df = pd.concat(all_subzone_data, ignore_index=True)
-                total_records = len(final_df)
-                
-                self.logger.info(f"Successfully extracted weather data for all EU countries: {total_records} total records")
-                
-                # Logowanie sukcesu
-                try:
-                    self._log_process('WEATHER_EXTRACTION_EU', 'SUCCESS', total_records)
-                except Exception as e:
-                    self.logger.warning(f"Error logging process: {str(e)}")
-                
-                return final_df
-            else:
-                self.logger.warning("No weather data extracted for any EU location")
-                try:
-                    self._log_process('WEATHER_EXTRACTION_EU', 'SUCCESS', 0)
-                except Exception as e:
-                    self.logger.warning(f"Error logging process: {str(e)}")
-                return pd.DataFrame()
-                
+            status = 'FAILED' if weather_data.empty else 'SUCCESS'
+            error = f"No data for: {', '.join(sorted(failed))}" if failed else None
+            self._log_process('WEATHER_EXTRACTION_EU', status, len(weather_data), error)
         except Exception as e:
-            self.logger.error(f"Error during EU weather data extraction: {str(e)}")
-            try:
-                self._log_process('WEATHER_EXTRACTION_EU', 'FAILED', 0, str(e))
-            except Exception as log_e:
-                self.logger.warning(f"Error logging process: {str(log_e)}")
-            raise
-    
-    def extract_climate_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """
-        Ekstrakcja wskaźników klimatycznych dla wszystkich stref i podstref UE
-        
-        Args:
-            start_date: Data rozpoczęcia
-            end_date: Data zakończenia
-            
-        Returns:
-            DataFrame ze wskaźnikami klimatycznymi
-        """
-        self.logger.info(f"Starting climate data extraction for EU countries from {start_date} to {end_date}")
-        
-        try:
-            self._log_process('CLIMATE_EXTRACTION_EU', 'RUNNING')
-        except Exception as e:
-            self.logger.warning(f"Error logging climate process: {str(e)}")
-        
-        all_climate_data = []
-        total_countries = len(self.weather_locations)
-        processed_countries = 0
-        total_cities = sum(len(zone_info['subzones']) for zone_info in self.weather_locations.values())
-        processed_cities = 0
-        
-        self.logger.info(f"Processing climate data for {total_countries} EU countries with {total_cities} cities total")
-        
-        try:
-            for country_code, zone_info in self.weather_locations.items():
-                self.logger.info(f"Processing climate data for {zone_info['name']} ({country_code}) - {len(zone_info['subzones'])} cities")
-                
-                # Pobieranie danych dla każdej podstrefy (miasta)
-                for subzone in zone_info['subzones']:
-                    processed_cities += 1
-                    self.logger.info(f"Fetching climate data for {subzone['name']} ({subzone['subzone_code']}) - city {processed_cities}/{total_cities}")
-                    
-                    climate_df = self.get_climate_indices(
-                        subzone['lat'], subzone['lon'], 
-                        start_date, end_date,
-                        subzone['subzone_code'], subzone['name']
-                    )
-                    
-                    if not climate_df.empty:
-                        # Dodanie informacji o strefie
-                        climate_df['country_code'] = country_code
-                        climate_df['zone_name'] = zone_info['name']
-                        all_climate_data.append(climate_df)
-                        self.logger.info(f"Successfully extracted {len(climate_df)} climate records for {subzone['name']}")
-                    else:
-                        self.logger.warning(f"No climate data retrieved for {subzone['name']}")
-                    
-                    time.sleep(1.0)
-                
-                processed_countries += 1
-                self.logger.info(f"Completed climate data for {zone_info['name']} - processed {processed_countries}/{total_countries} countries")
-                
-                # Dodatkowa przerwa między krajami
-                time.sleep(2.0)
-            
-            # Łączenie wszystkich danych
-            if all_climate_data:
-                final_climate_df = pd.concat(all_climate_data, ignore_index=True)
-                total_records = len(final_climate_df)
-                
-                self.logger.info(f"Successfully extracted climate data for all EU countries: {total_records} total records")
-                
-                try:
-                    self._log_process('CLIMATE_EXTRACTION_EU', 'SUCCESS', total_records)
-                except Exception as e:
-                    self.logger.warning(f"Error logging climate process: {str(e)}")
-                
-                return final_climate_df
-            else:
-                self.logger.warning("No climate data extracted for any EU location")
-                try:
-                    self._log_process('CLIMATE_EXTRACTION_EU', 'SUCCESS', 0)
-                except Exception as e:
-                    self.logger.warning(f"Error logging climate process: {str(e)}")
-                return pd.DataFrame()
-                
-        except Exception as e:
-            self.logger.error(f"Error during EU climate data extraction: {str(e)}")
-            try:
-                self._log_process('CLIMATE_EXTRACTION_EU', 'FAILED', 0, str(e))
-            except Exception as log_e:
-                self.logger.warning(f"Error logging climate process: {str(log_e)}")
-            raise
-    
+            self.logger.warning(f"Error logging process: {str(e)}")
+
+        return weather_data, climate_data
     def save_to_staging(self, weather_data: pd.DataFrame, climate_data: pd.DataFrame = None) -> bool:
         """
         Zapisanie danych pogodowych do tabel staging
@@ -826,6 +554,7 @@ class OpenMeteoClient:
                 air_pressure DECIMAL(7,2),
                 cloud_cover DECIMAL(5,2),
                 solar_radiation DECIMAL(7,2),
+                weather_code INT,
                 weather_condition NVARCHAR(30),
                 latitude DECIMAL(10,6),
                 longitude DECIMAL(10,6),
@@ -842,7 +571,8 @@ class OpenMeteoClient:
                 "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_code' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD subzone_code NVARCHAR(10) NULL",
                 "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_name' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD subzone_name NVARCHAR(100) NULL",
                 "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'latitude' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD latitude DECIMAL(10,6) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'longitude' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD longitude DECIMAL(10,6) NULL"
+                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'longitude' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD longitude DECIMAL(10,6) NULL",
+                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'weather_code' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD weather_code INT NULL"
             ]
             
             for statement in alter_statements:
@@ -1140,10 +870,10 @@ def main():
             cities = [subzone['name'] for subzone in zone_info['subzones']]
             print(f"  {zone_info['name']} ({country_code}): {', '.join(cities)}")
         
-        # Ekstrakcja danych pogodowych
+        # Weather (hourly) and climate (daily) data come from the same requests
         print("\nStarting weather data extraction...")
-        weather_data = client.extract_all_weather_data(start_date, end_date)
-        
+        weather_data, climate_data = client.extract_all(start_date, end_date)
+
         if weather_data.empty:
             print("Warning: No weather data extracted")
         else:
@@ -1155,12 +885,6 @@ def main():
             for _, row in country_summary.iterrows():
                 country_name = client.weather_locations[row['country_code']]['name']
                 print(f"  {country_name} ({row['country_code']}): {row['records']} records")
-        
-        # Ekstrakcja wskaźników klimatycznych (tylko dla pełnych dni)
-        climate_start = start_date.replace(hour=0, minute=0, second=0)
-        climate_end = end_date.replace(hour=0, minute=0, second=0)
-        print(f"\nStarting climate data extraction from {climate_start} to {climate_end}...")
-        climate_data = client.extract_climate_data(climate_start, climate_end)
         
         if climate_data.empty:
             print("Warning: No climate data extracted")
