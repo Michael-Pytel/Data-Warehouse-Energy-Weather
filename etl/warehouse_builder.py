@@ -158,13 +158,16 @@ class OptimizedWarehouseBuilder:
                 
                 try:
                     # Uproszczone zapytanie FK z timeout handling
-                    cursor.execute("""
-                        SELECT 
-                            CONSTRAINT_NAME, 
+                    # All warehouse tables: create_warehouse.sql also adds FKs from dimensions
+                    # (dim_weather_zone, dim_socioeconomic_profile) to dim_bidding_zone
+                    table_list = ', '.join(f"'{t}'" for t in self.all_tables)
+                    cursor.execute(f"""
+                        SELECT
+                            CONSTRAINT_NAME,
                             TABLE_NAME
-                        FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS 
+                        FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
                         WHERE CONSTRAINT_TYPE = 'FOREIGN KEY'
-                        AND TABLE_NAME IN ('fact_energy_weather')
+                        AND TABLE_NAME IN ({table_list})
                     """)
                     
                     foreign_keys = cursor.fetchall()
