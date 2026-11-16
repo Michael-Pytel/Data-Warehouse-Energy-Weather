@@ -103,7 +103,7 @@ class EurostatClient:
                 'description': 'Electricity prices for household consumers',
                 'params': {
                     'unit': 'KWH',         # Per kWh
-                    'product': '6000',     # Electricity
+                    'siec': 'E7000',       # Electricity (SIEC energy product code; formerly 'product': '6000')
                     'nrg_cons': 'KWH2500-4999',  # Band DC
                     'tax': 'X_TAX',        # Excluding taxes
                     'currency': 'EUR'
@@ -1195,12 +1195,14 @@ class EurostatClient:
                 for dataset_name, df in raw_data.items():
                     if not df.empty:
                         for _, row in df.iterrows():
+                            # iterrows turns None into NaN, which SQL Server rejects as a float
+                            value = None if pd.isna(row['value']) else float(row['value'])
                             cursor.execute("""
-                                INSERT INTO staging_eurostat_raw 
+                                INSERT INTO staging_eurostat_raw
                                 (dataset_name, country_code, country_name, time_period, value)
                                 VALUES (?, ?, ?, ?, ?)
-                            """, dataset_name, row['country_code'], row['country_name'], 
-                               row['time_period'], row['value'])
+                            """, dataset_name, row['country_code'], row['country_name'],
+                               row['time_period'], value)
                             raw_insert_count += 1
                 
                 # Wstaw zintegrowane dane
@@ -1244,7 +1246,7 @@ class EurostatClient:
                         industry_sector_percentage, 
                         avg_household_size, 
                         energy_poverty_rate, 
-                        row['primary_heating_type'], 
+                        None if pd.isna(row['primary_heating_type']) else row['primary_heating_type'],
                         int(row['data_quality_score']))
                         integrated_insert_count += 1
                 
