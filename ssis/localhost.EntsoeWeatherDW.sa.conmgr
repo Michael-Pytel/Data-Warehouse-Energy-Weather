@@ -1,0 +1,12 @@
+﻿<?xml version="1.0"?>
+<DTS:ConnectionManager xmlns:DTS="www.microsoft.com/SqlServer/Dts"
+  DTS:ObjectName="localhost.EntsoeWeatherDW.sa"
+  DTS:DTSID="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+  DTS:CreationName="OLEDB">
+  <DTS:ObjectData>
+    <DTS:ConnectionManager
+      DTS:ConnectRetryCount="1"
+      DTS:ConnectRetryInterval="5"
+      DTS:ConnectionString="Data Source=localhost;Initial Catalog=EnergyWeatherDW;Provider=MSOLEDBSQL19;Integrated Security=SSPI;Auto Translate=False;Use Encryption for Data=Optional;Application Name=SSIS-EnergyWeatherETL-{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}localhost.EntsoeWeatherDW.sa;" />
+  </DTS:ObjectData>
+</DTS:ConnectionManager>

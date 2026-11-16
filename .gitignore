@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets / local settings
+.env
+
+# ETL run output (scripts write these into their working directory)
+etl/*.csv
+etl/*.pkl
+etl/*.log
+etl/*.xml
+etl/*.json
+etl/eurostat_export/
+logs/
+
+# Visual Studio / SSIS build and user state
+.vs/
+ssis/bin/
+ssis/obj/
+*.user
+*.suo
+
+# Power BI binary report (~400 MB, over GitHub's 100 MB limit).
+# Publish it to the Power BI service, or save it as a .pbip project to version it.
+*.pbix
+
+# OS / misc
+*.lnk
+Thumbs.db
