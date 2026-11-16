@@ -6,6 +6,7 @@ Pobiera dane socjoekonomiczne dla krajów UE
 
 import requests
 import pandas as pd
+import zones
 from datetime import datetime, timedelta
 import time
 import logging
@@ -72,7 +73,7 @@ class EurostatClient:
         }
         
         # Priorytetowe kody krajów - WSZYSTKIE KRAJE Z ENTSO-E
-        self.priority_countries = ['PL', 'DE', 'FR', 'ES', 'IT', 'CZ', 'SK', 'HU', 'AT', 'SI', 'HR', 'RO', 'BG', 'GR', 'BE', 'NL', 'LU', 'IE', 'DK', 'SE', 'FI', 'EE', 'LV', 'LT', 'PT']
+        self.priority_countries = list(zones.EU_COUNTRIES)
         
         # KONFIGURACJA DATASETÓW - ZAKTUALIZOWANA WERSJA NA PODSTAWIE SZCZEGÓŁOWYCH TESTÓW
         # Updated dataset configurations for EurostatClient
@@ -275,6 +276,8 @@ class EurostatClient:
         base_params['sinceTimePeriod'] = str(since_year)
         
         if countries:
+            # Eurostat uses its own geo codes for some countries (Greece = EL)
+            countries = [zones.EUROSTAT_GEO_CODES.get(c, c) for c in countries]
             base_params['geo'] = countries
         
         # 1. Próba z domyślnymi parametrami
@@ -390,8 +393,9 @@ class EurostatClient:
             geo_data = dimension.get('geo', {}).get('category', {})
             time_data = dimension.get('time', {}).get('category', {})
             
-            geo_indices = geo_data.get('index', {})
-            geo_labels = geo_data.get('label', {})
+            # Map Eurostat geo codes back to ISO codes (EL -> GR)
+            geo_indices = {zones.EUROSTAT_TO_ISO.get(k, k): v for k, v in geo_data.get('index', {}).items()}
+            geo_labels = {zones.EUROSTAT_TO_ISO.get(k, k): v for k, v in geo_data.get('label', {}).items()}
             time_indices = time_data.get('index', {})
             
             records = []
@@ -412,6 +416,9 @@ class EurostatClient:
                 record['dataset'] = dataset_name
             
             df = pd.DataFrame(records)
+            if 'country_code' in df.columns:
+                # Some parsers read raw Eurostat keys; normalise geo codes to ISO (EL -> GR)
+                df['country_code'] = df['country_code'].replace(zones.EUROSTAT_TO_ISO)
             self.logger.info(f"Successfully parsed {len(df)} records for {dataset_name}")
             return df
             

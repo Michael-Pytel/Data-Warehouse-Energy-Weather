@@ -1,4 +1,4 @@
-﻿<?xml version="1.0"?>
+<?xml version="1.0"?>
 <DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
   DTS:refId="Package"
   DTS:CreationDate="6/4/2025 10:34:50 AM"
@@ -7,12 +7,12 @@
   DTS:CreatorName="DESKTOP-CJAL8FG\jakub"
   DTS:DTSID="{95855F71-1227-4686-BF53-319766D70941}"
   DTS:ExecutableType="Microsoft.Package"
-  DTS:LastModifiedProductVersion="16.0.5685.0"
+  DTS:LastModifiedProductVersion="17.0.1016.0"
   DTS:LocaleID="1045"
   DTS:ObjectName="Main_ETL_Process"
   DTS:PackageType="5"
   DTS:VersionBuild="53"
-  DTS:VersionGUID="{97CBA931-B0DB-4E01-8D44-30BBE0FD5531}">
+  DTS:VersionGUID="{9B7810D1-7451-4B9D-9084-6E24D8B6E847}">
   <DTS:Property
     DTS:Name="PackageFormatVersion">8</DTS:Property>
   <DTS:Variables>
@@ -32,7 +32,7 @@
       DTS:Namespace="User"
       DTS:ObjectName="Countries">
       <DTS:VariableValue
-        DTS:DataType="8">IT,DE,CZ,SK,PL,HU,FR,ES</DTS:VariableValue>
+        DTS:DataType="8">AT,BE,BG,CY,CZ,DE,DK,EE,ES,FI,FR,GR,HR,HU,IE,IT,LT,LU,LV,MT,NL,PL,PT,RO,SE,SI,SK</DTS:VariableValue>
     </DTS:Variable>
     <DTS:Variable
       DTS:CreationName=""
@@ -72,6 +72,15 @@
     </DTS:Variable>
     <DTS:Variable
       DTS:CreationName=""
+      DTS:DTSID="{3A52BB69-6228-47ED-AC39-905BDF6076B0}"
+      DTS:IncludeInDebugDump="2345"
+      DTS:Namespace="User"
+      DTS:ObjectName="ScriptsFolder">
+      <DTS:VariableValue
+        DTS:DataType="8">C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl</DTS:VariableValue>
+    </DTS:Variable>
+    <DTS:Variable
+      DTS:CreationName=""
       DTS:DTSID="{4F543958-5AA9-4BFE-A9B7-8F59E8194DB1}"
       DTS:IncludeInDebugDump="2345"
       DTS:Namespace="User"
@@ -87,15 +96,6 @@
       DTS:ObjectName="StartDate">
       <DTS:VariableValue
         DTS:DataType="8">2023-12-30</DTS:VariableValue>
-    </DTS:Variable>
-    <DTS:Variable
-      DTS:CreationName=""
-      DTS:DTSID="{3A52BB69-6228-47ED-AC39-905BDF6076B0}"
-      DTS:IncludeInDebugDump="2345"
-      DTS:Namespace="User"
-      DTS:ObjectName="ScriptsFolder">
-      <DTS:VariableValue
-        DTS:DataType="8">C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl</DTS:VariableValue>
     </DTS:Variable>
   </DTS:Variables>
   <DTS:Executables>
@@ -155,11 +155,11 @@
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:PropertyExpression
+        DTS:Name="Arguments">"dimension_processor.py" + " \""+@[User::StartDate] + "\" " + "\""+"2026-12-31"+"\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
         DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
       <DTS:PropertyExpression
         DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"dimension_processor.py" + " \""+@[User::StartDate] + "\" " + "\""+"2026-12-31"+"\""</DTS:PropertyExpression>
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
@@ -179,15 +179,15 @@
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:PropertyExpression
+        DTS:Name="Arguments">"eurostat_client.py " +@[User::SinceYear]+" \""+ @[User::Countries]+"\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
         DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
       <DTS:PropertyExpression
         DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"eurostat_client.py " +@[User::SinceYear]+" \""+ @[User::Countries]+"\""</DTS:PropertyExpression>
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
-          Arguments="eurostat_client.py 2020 &quot;IT,DE,CZ,SK,PL,HU,FR,ES&quot;"
+          Arguments="eurostat_client.py 2020 &quot;AT,BE,BG,CY,CZ,DE,DK,EE,ES,FI,FR,GR,HR,HU,IE,IT,LT,LU,LV,MT,NL,PL,PT,RO,SE,SI,SK&quot;"
           WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
       </DTS:ObjectData>
     </DTS:Executable>
@@ -247,11 +247,11 @@
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:PropertyExpression
+        DTS:Name="Arguments">"open_meteo_client.py" +" \"" + @[User::StartDate]+"\"" +" \"" + @[User::EndDate]+"\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
         DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
       <DTS:PropertyExpression
         DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"open_meteo_client.py" +" \"" + @[User::StartDate]+"\"" +" \"" + @[User::EndDate]+"\""</DTS:PropertyExpression>
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
@@ -271,11 +271,11 @@
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:PropertyExpression
+        DTS:Name="Arguments">"entsoe_client.py" + " --connection \"" + @[User::ConnectionString] + "\"" + " --start \"" + @[User::StartDate] + "\"" + " --end \"" + @[User::EndDate] + "\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
         DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
       <DTS:PropertyExpression
         DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"entsoe_client.py" + " --connection \"" + @[User::ConnectionString] + "\"" + " --start \"" + @[User::StartDate] + "\"" + " --end \"" + @[User::EndDate] + "\""</DTS:PropertyExpression>
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
