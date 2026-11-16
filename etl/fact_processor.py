@@ -559,6 +559,9 @@ class MemoryOptimizedFactProcessor:
             if col not in weather_df.columns:
                 weather_df[col] = default_val
         
+        # Decision A: one weather value per country and hour = average of its cities
+        weather_df = self._aggregate_weather_per_country(weather_df)
+
         # Łączenie z danymi klimatycznymi jeśli dostępne
         if not climate_df.empty:
             climate_df = self.optimize_dataframe_memory(climate_df)
@@ -576,34 +579,64 @@ class MemoryOptimizedFactProcessor:
         
         return self.optimize_dataframe_memory(weather_df)
     
+    def _aggregate_weather_per_country(self, weather_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Decision A: one weather row per country and hour, averaged over the country's cities.
+
+        - numeric values: mean of the cities
+        - wind direction: vector (circular) mean, so 350° and 10° average to 0°, not 180°
+        - weather condition: the most frequent condition among the cities; ties go to the
+          more severe one (higher WMO weather code)
+        """
+        keys = ['timestamp', 'country_code']
+        df = weather_df.copy()
+        df['country_code'] = df['country_code'].astype(str)
+        n_cities = df.groupby(keys).size()
+
+        numeric_cols = [c for c in ['temperature_avg', 'temperature_min', 'temperature_max', 'humidity',
+                                    'precipitation', 'wind_speed', 'air_pressure', 'cloud_cover',
+                                    'solar_radiation'] if c in df.columns]
+        result = df.groupby(keys)[numeric_cols].mean().astype(float)
+
+        if 'wind_direction' in df.columns:
+            radians = np.deg2rad(df['wind_direction'].astype(float))
+            components = pd.DataFrame({'sin': np.sin(radians), 'cos': np.cos(radians)})
+            components[keys] = df[keys].values
+            means = components.groupby(keys)[['sin', 'cos']].mean()
+            result['wind_direction'] = (np.rad2deg(np.arctan2(means['sin'], means['cos'])) % 360).round()
+
+        if 'weather_condition' in df.columns:
+            df['weather_condition'] = df['weather_condition'].astype(str)
+            df['_code'] = df['weather_code'].astype(float) if 'weather_code' in df.columns else 0.0
+            counts = (df.groupby(keys + ['weather_condition'])
+                        .agg(_n=('_code', 'size'), _severity=('_code', 'max'))
+                        .reset_index()
+                        .sort_values(keys + ['_n', '_severity'], ascending=[True, True, False, False]))
+            condition = counts.drop_duplicates(keys).set_index(keys)['weather_condition']
+            result['weather_condition'] = condition
+
+        result = result.reset_index()
+        self.logger.info(f"Aggregated {len(weather_df)} city weather rows to {len(result)} country rows "
+                         f"(cities per country: {n_cities.min()}-{n_cities.max()})")
+        return result
+
     def _merge_climate_data_optimized(self, weather_df: pd.DataFrame, climate_df: pd.DataFrame) -> pd.DataFrame:
-        """Optymalizowane łączenie danych klimatycznych"""
-        
+        """Add daily heating/cooling degree days (average of the country's cities) to the hourly weather."""
+
         self.logger.info(f"Merging {len(climate_df)} climate records with weather data")
-        
-        climate_df['date'] = pd.to_datetime(climate_df['date'])
+
+        climate = climate_df[['date', 'country_code', 'heating_degree_days', 'cooling_degree_days']].copy()
+        climate['date'] = pd.to_datetime(climate['date']).dt.date
+        climate['country_code'] = climate['country_code'].astype(str)
+        # Decision A: average of the cities per country and day
+        climate = climate.groupby(['date', 'country_code'], as_index=False)[
+            ['heating_degree_days', 'cooling_degree_days']].mean()
+
         weather_df['date'] = weather_df['timestamp'].dt.date
-        climate_df['date_only'] = climate_df['date'].dt.date
-        
-        # Utwórz mapowanie dla szybszego łączenia
-        climate_dict = {}
-        for _, row in climate_df.iterrows():
-            key = (row['date_only'], row['country_code'])
-            climate_dict[key] = {
-                'heating_degree_days': row.get('heating_degree_days', 0.0),
-                'cooling_degree_days': row.get('cooling_degree_days', 0.0)
-            }
-        
-        # Zastosuj mapowanie
-        weather_df['heating_degree_days'] = 0.0
-        weather_df['cooling_degree_days'] = 0.0
-        
-        for idx, row in weather_df.iterrows():
-            key = (row['date'], row['country_code'])
-            if key in climate_dict:
-                weather_df.at[idx, 'heating_degree_days'] = climate_dict[key]['heating_degree_days']
-                weather_df.at[idx, 'cooling_degree_days'] = climate_dict[key]['cooling_degree_days']
-        
+        weather_df = weather_df.merge(climate, on=['date', 'country_code'], how='left')
+        weather_df[['heating_degree_days', 'cooling_degree_days']] = (
+            weather_df[['heating_degree_days', 'cooling_degree_days']].fillna(0.0))
+
         weather_df.drop(['date'], axis=1, inplace=True)
         return weather_df
     
