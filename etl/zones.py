@@ -2,8 +2,8 @@
 Single source of truth for the countries and ENTSO-E areas covered by the pipeline.
 
 Every script that needs bidding-zone codes imports them from here, so the codes
-used to extract data (entsoe_client.py) and the codes stored in the dimensions
-(dimension_processor.py) always match - fact_processor.py joins on them.
+used to extract data (entsoe_client.py) and the codes stored in dim_bidding_zone
+(loaded via reference_loader.py) always match - the fact load joins on them.
 
 EIC codes verified against the entsoe-py `Area` mapping
 (https://github.com/EnergieID/entsoe-py/blob/master/entsoe/mappings.py).
@@ -43,6 +43,17 @@ BIDDING_ZONES = {
 
 # ISO 3166 country codes covered by the pipeline (all 27 EU member states).
 EU_COUNTRIES = sorted({zone['country'] for zone in BIDDING_ZONES.values()})
+
+# English country names (dim_bidding_zone.country_name)
+COUNTRY_NAMES = {
+    'AT': 'Austria', 'BE': 'Belgium', 'BG': 'Bulgaria', 'HR': 'Croatia', 'CY': 'Cyprus',
+    'CZ': 'Czechia', 'DK': 'Denmark', 'EE': 'Estonia', 'FI': 'Finland', 'FR': 'France',
+    'DE': 'Germany', 'GR': 'Greece', 'HU': 'Hungary', 'IE': 'Ireland', 'IT': 'Italy',
+    'LV': 'Latvia', 'LT': 'Lithuania', 'LU': 'Luxembourg', 'MT': 'Malta', 'NL': 'Netherlands',
+    'PL': 'Poland', 'PT': 'Portugal', 'RO': 'Romania', 'SK': 'Slovakia', 'SI': 'Slovenia',
+    'ES': 'Spain', 'SE': 'Sweden',
+}
+assert set(COUNTRY_NAMES) == set(EU_COUNTRIES), "COUNTRY_NAMES must cover exactly the zone countries"
 
 # Eurostat uses its own code for Greece.
 EUROSTAT_GEO_CODES = {'GR': 'EL'}
