@@ -1,0 +1,60 @@
+relationship d99b8acb-236b-4112-85ea-918b73d8998a
+	fromColumn: fact_load.bidding_zone_key
+	toColumn: dim_bidding_zone.bidding_zone_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship 37652b2a-4f7e-4469-8bda-ccf1d0086dcb
+	fromColumn: fact_load.date_key
+	toColumn: dim_date.date_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship 845b0c8c-b0c8-4246-a115-847309423aa8
+	fromColumn: fact_load.socioeconomic_profile_key
+	toColumn: dim_socioeconomic_profile.socioeconomic_profile_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship ddcf22e9-88cc-4cc3-b30e-3dc648897a2b
+	fromColumn: fact_load.time_key
+	toColumn: dim_time.time_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship c14a7db8-5d99-4f4c-9d8c-57175f1000e7
+	fromColumn: fact_load.weather_condition_key
+	toColumn: dim_weather_condition.weather_condition_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship 9f96363d-c238-4fc3-8cc9-098c2376d43a
+	fromColumn: fact_generation.bidding_zone_key
+	toColumn: dim_bidding_zone.bidding_zone_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship f0812441-f85d-4d38-bc95-622a1c3f15e4
+	fromColumn: fact_generation.date_key
+	toColumn: dim_date.date_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship d423c324-26ce-4770-bca8-c916ae253bc3
+	fromColumn: fact_generation.generation_type_key
+	toColumn: dim_generation_type.generation_type_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship 507751d3-6672-4f2a-b5e5-513d70ab2fa2
+	fromColumn: fact_generation.socioeconomic_profile_key
+	toColumn: dim_socioeconomic_profile.socioeconomic_profile_key
+
+	annotation PBI_IsFromSource = FS
+
+relationship 373f6c08-a828-4e03-bbfd-dfe28f45d7ad
+	fromColumn: fact_generation.time_key
+	toColumn: dim_time.time_key
+
+	annotation PBI_IsFromSource = FS
+

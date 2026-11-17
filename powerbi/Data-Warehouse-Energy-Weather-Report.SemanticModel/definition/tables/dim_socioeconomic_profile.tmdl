@@ -1,0 +1,111 @@
+table dim_socioeconomic_profile
+	lineageTag: 815e510c-b25c-4450-ab42-ab91135797c5
+
+	column socioeconomic_profile_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: db7ab2fd-d719-4dba-9bd8-cb273503a805
+		summarizeBy: none
+		sourceColumn: socioeconomic_profile_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = User
+
+	column country_code
+		dataType: string
+		lineageTag: 46697d55-2248-41a5-ab29-d87d757fcf02
+		summarizeBy: none
+		sourceColumn: country_code
+
+		annotation SummarizationSetBy = Automatic
+
+	column year
+		dataType: int64
+		formatString: 0
+		lineageTag: 8dc9274a-416d-408a-b0e3-e2da1d5f8f03
+		summarizeBy: none
+		sourceColumn: year
+
+		annotation SummarizationSetBy = User
+
+	column population
+		dataType: int64
+		formatString: 0
+		lineageTag: ccd1d9f5-0764-45e9-ad20-e566a4b0d193
+		summarizeBy: none
+		sourceColumn: population
+
+		annotation SummarizationSetBy = User
+
+	column gdp_per_capita_eur
+		dataType: double
+		lineageTag: 207ae7f4-5113-430b-9c2a-b1766a19d42e
+		summarizeBy: none
+		sourceColumn: gdp_per_capita_eur
+
+		annotation SummarizationSetBy = User
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column electricity_price_eur_kwh
+		dataType: double
+		lineageTag: 2ab70737-1690-49d1-bc58-81f666d8df94
+		summarizeBy: none
+		sourceColumn: electricity_price_eur_kwh
+
+		annotation SummarizationSetBy = User
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column energy_intensity
+		dataType: double
+		lineageTag: 94c11e98-b671-4bda-bcf7-554291392ce6
+		summarizeBy: none
+		sourceColumn: energy_intensity
+
+		annotation SummarizationSetBy = User
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column unemployment_rate_pct
+		dataType: double
+		lineageTag: c9e21ccb-27b7-4624-83ea-583cf82c4e4f
+		summarizeBy: none
+		sourceColumn: unemployment_rate_pct
+
+		annotation SummarizationSetBy = User
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column is_estimated
+		dataType: string
+		lineageTag: 82cb74a7-0ac7-49f4-beac-9036bdf0148a
+		summarizeBy: none
+		sourceColumn: is_estimated
+
+		annotation SummarizationSetBy = Automatic
+
+	column estimate_note
+		dataType: string
+		lineageTag: dade2f69-579c-4730-a5fa-b807a299b68f
+		summarizeBy: none
+		sourceColumn: estimate_note
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_socioeconomic_profile = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_socioeconomic_profile = Source{[Schema="dbo",Item="dim_socioeconomic_profile"]}[Data],
+				    #"Removed Columns" = Table.RemoveColumns(dbo_dim_socioeconomic_profile,{"valid_from"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

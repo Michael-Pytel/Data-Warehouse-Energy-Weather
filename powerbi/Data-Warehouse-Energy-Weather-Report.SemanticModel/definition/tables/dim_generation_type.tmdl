@@ -1,0 +1,66 @@
+table dim_generation_type
+	lineageTag: fefd8ccd-6103-45cc-ab87-e9ab2c9655d7
+
+	column generation_type_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 0d03dbc2-1292-4a70-a5f0-8bcaf024b879
+		summarizeBy: none
+		sourceColumn: generation_type_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column entsoe_code
+		dataType: string
+		lineageTag: 918eb877-a60a-415c-aa77-df989cd01184
+		summarizeBy: none
+		sourceColumn: entsoe_code
+
+		annotation SummarizationSetBy = Automatic
+
+	column generation_type_name
+		dataType: string
+		lineageTag: b98bff6f-d1a2-4872-aff9-770e2682d34e
+		summarizeBy: none
+		sourceColumn: generation_type_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column generation_category
+		dataType: string
+		lineageTag: fb9f6601-0062-4c87-99ab-58c28409e102
+		summarizeBy: none
+		sourceColumn: generation_category
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_renewable
+		dataType: string
+		lineageTag: ecb48f4b-eba6-4c32-a703-013c873a57f4
+		summarizeBy: none
+		sourceColumn: is_renewable
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_intermittent
+		dataType: string
+		lineageTag: efc0224e-3d60-438a-af41-8f763dbb672c
+		summarizeBy: none
+		sourceColumn: is_intermittent
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_generation_type = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_generation_type = Source{[Schema="dbo",Item="dim_generation_type"]}[Data]
+				in
+				    dbo_dim_generation_type
+
+	annotation PBI_ResultType = Table
+

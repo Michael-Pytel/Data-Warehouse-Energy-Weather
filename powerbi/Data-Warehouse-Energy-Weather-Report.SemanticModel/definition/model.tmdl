@@ -1,0 +1,28 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-DK
+	valueFilterBehavior: independent
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+annotation PBI_ProTooling = ["DevMode"]
+
+annotation PBI_QueryOrder = ["fact_load","fact_generation","dim_date","dim_time","dim_bidding_zone","dim_generation_type","dim_weather_condition","dim_socioeconomic_profile","_Measures"]
+
+ref table fact_load
+ref table fact_generation
+ref table dim_date
+ref table dim_time
+ref table dim_bidding_zone
+ref table dim_generation_type
+ref table dim_weather_condition
+ref table dim_socioeconomic_profile
+ref table _Measures
+ref table 'Forecast Metric'
+
+ref cultureInfo en-US
+

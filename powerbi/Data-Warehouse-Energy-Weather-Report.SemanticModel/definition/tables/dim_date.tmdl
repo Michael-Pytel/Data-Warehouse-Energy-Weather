@@ -1,0 +1,165 @@
+table dim_date
+	lineageTag: 26aa9181-392f-4fb2-b167-92b5719e93a5
+	dataCategory: Time
+
+	column date_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 5b5f37b9-891a-4f20-92d4-0e396aee1006
+		summarizeBy: none
+		sourceColumn: date_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column full_date
+		dataType: dateTime
+		isKey
+		formatString: Long Date
+		lineageTag: bf026204-8951-4edb-b90d-b82a688d5b92
+		summarizeBy: none
+		sourceColumn: full_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column year
+		dataType: int64
+		formatString: 0
+		lineageTag: 7d8096e6-aed8-4cff-ba1e-9c134a719695
+		summarizeBy: none
+		sourceColumn: year
+
+		annotation SummarizationSetBy = User
+
+	column quarter
+		dataType: int64
+		formatString: 0
+		lineageTag: b53383ea-49e6-4b27-9bd0-eda377b9e272
+		summarizeBy: none
+		sourceColumn: quarter
+
+		annotation SummarizationSetBy = User
+
+	column month
+		dataType: int64
+		formatString: 0
+		lineageTag: 295f79dd-e3fa-498c-9bf4-8b27d5f34eda
+		summarizeBy: none
+		sourceColumn: month
+
+		annotation SummarizationSetBy = User
+
+	column month_name
+		dataType: string
+		lineageTag: b9e7d39a-9257-489d-836c-b640e14af7fa
+		summarizeBy: none
+		sourceColumn: month_name
+		sortByColumn: month
+
+		changedProperty = SortByColumn
+
+		annotation SummarizationSetBy = Automatic
+
+	column year_month
+		dataType: string
+		lineageTag: 855f1e4f-f08e-4d53-925b-108531029e9a
+		summarizeBy: none
+		sourceColumn: year_month
+
+		annotation SummarizationSetBy = Automatic
+
+	column day_of_month
+		dataType: int64
+		formatString: 0
+		lineageTag: b70a8f99-cdc3-497e-bca6-1b5ab086a624
+		summarizeBy: none
+		sourceColumn: day_of_month
+
+		annotation SummarizationSetBy = User
+
+	column day_of_week
+		dataType: int64
+		formatString: 0
+		lineageTag: bc4755c0-0e69-4329-802e-83c068b6e292
+		summarizeBy: none
+		sourceColumn: day_of_week
+
+		annotation SummarizationSetBy = User
+
+	column day_name
+		dataType: string
+		lineageTag: ae9127d7-2aa0-47ae-845a-c479632bb35e
+		summarizeBy: none
+		sourceColumn: day_name
+		sortByColumn: day_of_week
+
+		changedProperty = SortByColumn
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_weekend
+		dataType: string
+		lineageTag: 4f0bce72-3625-4df2-bd72-0333cda85cde
+		summarizeBy: none
+		sourceColumn: is_weekend
+
+		annotation SummarizationSetBy = Automatic
+
+	column season
+		dataType: string
+		lineageTag: b9f7b373-c28e-4797-a083-4ac6968cb1df
+		summarizeBy: none
+		sourceColumn: season
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Month Label' = FORMAT ( dim_date[full_date], "MMM yy" )
+		dataType: string
+		lineageTag: 3f6c2b7e-8d41-4a59-9c1e-5b2d7a90e4c1
+		summarizeBy: none
+		sortByColumn: year_month
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Month Start' = DATE ( dim_date[year], dim_date[month], 1 )
+		dataType: dateTime
+		formatString: mmm yyyy
+		lineageTag: 4b7d0e5c-9fb6-4a0d-a8c5-bd6a3fc1c245
+		summarizeBy: none
+
+		annotation SummarizationSetBy = Automatic
+
+	hierarchy Calendar
+		lineageTag: a8328f46-ea83-4235-8b1c-76c2d7148257
+
+		level year
+			lineageTag: 4bf4c84f-ba79-451a-a12e-4991064d2219
+			column: year
+
+		level quarter
+			lineageTag: 04f5e6bf-c316-48b6-b3be-ecd3c283c3f6
+			column: quarter
+
+		level month_name
+			lineageTag: ebb24893-aa94-448b-8818-9800d1920c06
+			column: month_name
+
+		level full_date
+			lineageTag: 43f92a65-fc65-4a30-9ad6-8d13f1ddde0e
+			column: full_date
+
+	partition dim_date = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_date = Source{[Schema="dbo",Item="dim_date"]}[Data]
+				in
+				    dbo_dim_date
+
+	annotation PBI_ResultType = Table
+

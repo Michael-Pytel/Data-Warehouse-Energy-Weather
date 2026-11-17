@@ -1,0 +1,215 @@
+table fact_load
+	lineageTag: a3180766-c82c-4159-9c09-6ae2d4c34295
+
+	column date_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: e9d2de84-4340-40f2-9fcd-5bbc54a53c9a
+		summarizeBy: none
+		sourceColumn: date_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column time_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 5e38e075-f31a-4056-a827-93c1913c2849
+		summarizeBy: none
+		sourceColumn: time_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column bidding_zone_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: cebf1bb4-8660-48ae-955c-2f1df1f4eb91
+		summarizeBy: none
+		sourceColumn: bidding_zone_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column socioeconomic_profile_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: a5368f30-4caf-4761-bb20-98480c5eb60a
+		summarizeBy: none
+		sourceColumn: socioeconomic_profile_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column weather_condition_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: d82559a4-4447-449e-a92a-78fe2db2033c
+		summarizeBy: none
+		sourceColumn: weather_condition_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_public_holiday
+		dataType: string
+		lineageTag: 73b363db-21e0-4123-aeeb-a520f095048e
+		summarizeBy: none
+		sourceColumn: is_public_holiday
+
+		annotation SummarizationSetBy = Automatic
+
+	column actual_load_mwh
+		dataType: double
+		lineageTag: 2a18f297-a912-44f2-9db6-080efcc5394f
+		summarizeBy: sum
+		sourceColumn: actual_load_mwh
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column forecast_load_mwh
+		dataType: double
+		lineageTag: 02eff17b-b86d-4d5e-afb1-b49d2a32c175
+		summarizeBy: sum
+		sourceColumn: forecast_load_mwh
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column temperature_c
+		dataType: double
+		lineageTag: d4bcdd86-97e4-4fcf-bcac-70e078e75854
+		summarizeBy: sum
+		sourceColumn: temperature_c
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column humidity_pct
+		dataType: double
+		lineageTag: d39680f6-6b23-4a03-bae8-10e824bcde9e
+		summarizeBy: sum
+		sourceColumn: humidity_pct
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column precipitation_mm
+		dataType: double
+		lineageTag: 34ee7a2c-5eab-47c8-bcbb-f908a774fe17
+		summarizeBy: sum
+		sourceColumn: precipitation_mm
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column wind_speed_kmh
+		dataType: double
+		lineageTag: 1664e39b-08ce-4d01-9ebc-6d2fb6156d2c
+		summarizeBy: sum
+		sourceColumn: wind_speed_kmh
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column wind_direction_deg
+		dataType: int64
+		formatString: 0
+		lineageTag: c04b0ca4-308f-488c-9caf-809922462f74
+		summarizeBy: sum
+		sourceColumn: wind_direction_deg
+
+		annotation SummarizationSetBy = Automatic
+
+	column cloud_cover_pct
+		dataType: double
+		lineageTag: 27532592-58f5-47f8-98ae-de90b0e68825
+		summarizeBy: sum
+		sourceColumn: cloud_cover_pct
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column solar_radiation_wm2
+		dataType: double
+		lineageTag: 28180310-cff3-4099-973d-07b492f3a81b
+		summarizeBy: sum
+		sourceColumn: solar_radiation_wm2
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column air_pressure_hpa
+		dataType: double
+		lineageTag: b8e30ec6-e03c-45c1-88f8-e79dd96ec171
+		summarizeBy: sum
+		sourceColumn: air_pressure_hpa
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column heating_degree_hours
+		dataType: double
+		lineageTag: 30b899e5-c25b-4103-87ee-553865c5ede1
+		summarizeBy: sum
+		sourceColumn: heating_degree_hours
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column cooling_degree_hours
+		dataType: double
+		lineageTag: 1e7cc2df-9c19-4c86-ba06-f949039519c6
+		summarizeBy: sum
+		sourceColumn: cooling_degree_hours
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column 'Day Type' =
+			
+			IF (
+			    fact_load[is_public_holiday] = "Yes", "Public holiday",
+			    IF ( RELATED ( dim_date[is_weekend] ) = "Yes", "Weekend", "Working day" )
+			)
+		lineageTag: 6ff6f249-186b-4812-9731-329f34e3377b
+		summarizeBy: none
+
+		annotation SummarizationSetBy = Automatic
+
+	partition fact_load = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_fact_load = Source{[Schema="dbo",Item="fact_load"]}[Data],
+				    #"Removed Columns" = Table.RemoveColumns(dbo_fact_load,{"loaded_at", "updated_at"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

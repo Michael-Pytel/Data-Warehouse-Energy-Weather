@@ -1,0 +1,70 @@
+table dim_bidding_zone
+	lineageTag: d51ff1c5-f955-4885-b29c-b424091ac6bc
+
+	column bidding_zone_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 720367ec-a2ce-4926-bea0-eaedf5955f87
+		summarizeBy: none
+		sourceColumn: bidding_zone_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column bidding_zone_code
+		dataType: string
+		lineageTag: 3d1ba25e-49e0-47d2-8d4b-6f8a94adc6f8
+		summarizeBy: none
+		sourceColumn: bidding_zone_code
+
+		annotation SummarizationSetBy = Automatic
+
+	column bidding_zone_name
+		dataType: string
+		lineageTag: 09ccfc11-d6ef-4350-9918-6cd28d51c5d1
+		summarizeBy: none
+		sourceColumn: bidding_zone_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column country_code
+		dataType: string
+		lineageTag: 9f1cb5e9-782e-4be3-ac9f-288f220dfa18
+		summarizeBy: none
+		sourceColumn: country_code
+
+		annotation SummarizationSetBy = Automatic
+
+	column country_name
+		dataType: string
+		lineageTag: ebf35ced-7d92-4883-946c-cbdaabc0aa20
+		dataCategory: Country
+		summarizeBy: none
+		sourceColumn: country_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column timezone
+		dataType: string
+		lineageTag: 82917c1a-c62b-4e6b-a692-03f1659eeb1e
+		summarizeBy: none
+		sourceColumn: timezone
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_bidding_zone = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_bidding_zone = Source{[Schema="dbo",Item="dim_bidding_zone"]}[Data],
+				    #"Removed Columns" = Table.RemoveColumns(dbo_dim_bidding_zone,{"valid_from"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

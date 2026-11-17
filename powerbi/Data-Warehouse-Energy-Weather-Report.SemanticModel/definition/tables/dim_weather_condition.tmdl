@@ -1,0 +1,50 @@
+table dim_weather_condition
+	lineageTag: c29c78e3-b73f-487d-a8b2-a1d69529821d
+
+	column weather_condition_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 331489dc-af6d-4e9c-a686-524bb01f687b
+		summarizeBy: none
+		sourceColumn: weather_condition_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column condition_name
+		dataType: string
+		lineageTag: b4d275e8-bd04-4b84-890e-ed7eb4521929
+		summarizeBy: none
+		sourceColumn: condition_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column severity
+		dataType: string
+		lineageTag: 183d4d52-0e2e-487d-b2f8-55460c86c74b
+		summarizeBy: none
+		sourceColumn: severity
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_extreme
+		dataType: string
+		lineageTag: 0d816ee7-22b4-45ad-b84a-4d2a71864be6
+		summarizeBy: none
+		sourceColumn: is_extreme
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_weather_condition = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_weather_condition = Source{[Schema="dbo",Item="dim_weather_condition"]}[Data]
+				in
+				    dbo_dim_weather_condition
+
+	annotation PBI_ResultType = Table
+

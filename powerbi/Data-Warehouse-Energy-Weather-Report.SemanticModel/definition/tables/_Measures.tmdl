@@ -1,0 +1,856 @@
+table _Measures
+	lineageTag: a6a602ab-3605-46be-b821-1e7095880d21
+
+	measure 'Actual Load (MWh)' = SUM ( fact_load[actual_load_mwh] )
+		formatString: #,0
+		displayFolder: Load
+		lineageTag: facf1221-8476-4609-a583-ae8530896e1b
+
+	measure 'Actual Load (TWh)' = DIVIDE ( [Actual Load (MWh)], 1000000 )
+		formatString: #,0.0
+		displayFolder: Load
+		lineageTag: 1c09fe6c-474a-49f2-858e-c14a4589ba1d
+
+	measure 'Forecast Load (MWh)' = SUM ( fact_load[forecast_load_mwh] )
+		formatString: #,0
+		displayFolder: Load
+		lineageTag: e15540f8-76fa-4429-927e-7a64c677efea
+
+	measure 'Average Load (MW)' =
+			
+			AVERAGEX (
+			    CROSSJOIN ( VALUES ( dim_date[date_key] ), VALUES ( dim_time[time_key] ) ),
+			    [Actual Load (MWh)]
+			)
+		formatString: #,0
+		displayFolder: Load
+		lineageTag: 83c49b57-e5e1-414f-8652-4e472c1a4017
+
+	measure 'Peak Load (MW)' =
+			
+			MAXX (
+			    CROSSJOIN ( VALUES ( dim_date[date_key] ), VALUES ( dim_time[time_key] ) ),
+			    [Actual Load (MWh)]
+			)
+		formatString: #,0
+		displayFolder: Load
+		lineageTag: 46255466-c543-4060-bce3-2800ad15d78b
+
+	measure 'Load With Forecast (MWh)' =
+			
+			CALCULATE ( [Actual Load (MWh)], NOT ISBLANK ( fact_load[forecast_load_mwh] ) )
+		formatString: #,0
+		displayFolder: Load\Forecast
+		lineageTag: d964704e-74f8-4aa5-953b-125d1fe82546
+
+	measure 'Forecast Error %' =
+			
+			DIVIDE (
+			    SUMX (
+			        fact_load,
+			        IF (
+			            NOT ISBLANK ( fact_load[actual_load_mwh] ) && NOT ISBLANK ( fact_load[forecast_load_mwh] ),
+			            ABS ( fact_load[forecast_load_mwh] - fact_load[actual_load_mwh] )
+			        )
+			    ),
+			    [Load With Forecast (MWh)]
+			)
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Load\Forecast
+		lineageTag: 07436c6a-cbf7-4ba7-9e95-2c57db328f1b
+
+	measure 'Forecast Bias %' =
+			
+			DIVIDE (
+			    SUMX (
+			        fact_load,
+			        IF (
+			            NOT ISBLANK ( fact_load[actual_load_mwh] ) && NOT ISBLANK ( fact_load[forecast_load_mwh] ),
+			            fact_load[forecast_load_mwh] - fact_load[actual_load_mwh]
+			        )
+			    ),
+			    [Load With Forecast (MWh)]
+			)
+		formatString: +0.0%;-0.0%;0.0%
+		displayFolder: Load\Forecast
+		lineageTag: 8c09e76b-1d19-4c0a-9ee0-684d990938eb
+
+		annotation PBI_FormatHint = {"isCustom":true}
+
+	measure 'Hours in Period' = COUNTROWS ( dim_date ) * COUNTROWS ( dim_time )
+		formatString: #,0
+		displayFolder: Load\Coverage
+		lineageTag: 86ade07f-fd58-4793-b18e-213096f1fe15
+
+	measure Zones = COUNTROWS ( FILTER ( dim_bidding_zone, dim_bidding_zone[bidding_zone_key] <> 0 ) )
+		formatString: #,0
+		displayFolder: Load\Coverage
+		lineageTag: 8edeb5af-be06-4ead-9784-8c426185d1dd
+
+	measure 'Load Coverage %' =
+			
+			DIVIDE ( COUNT ( fact_load[actual_load_mwh] ), [Hours in Period] * [Zones] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Load\Coverage
+		lineageTag: 7543fd83-0c39-463d-9067-e7f645d72a6d
+
+	measure 'Generation (MWh)' = SUM ( fact_generation[generation_mwh] )
+		formatString: #,0
+		displayFolder: Generation
+		lineageTag: 2c561aa6-2597-45bf-afed-3bac2ec3afa4
+
+	measure 'Generation (TWh)' = DIVIDE ( [Generation (MWh)], 1000000 )
+		formatString: #,0.0
+		displayFolder: Generation
+		lineageTag: 98c66f7b-672e-4c69-af54-62138428ccb2
+
+	measure 'Renewable Share %' =
+			
+			DIVIDE ( CALCULATE ( [Generation (MWh)], dim_generation_type[is_renewable] = "Yes" ), [Generation (MWh)] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: d3c95ebd-ecc1-481a-a5a0-0dabf90f147b
+
+	measure 'Intermittent Share %' =
+			
+			DIVIDE ( CALCULATE ( [Generation (MWh)], dim_generation_type[is_intermittent] = "Yes" ), [Generation (MWh)] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: 4b66a537-5c71-4f6e-9052-a4ab5bc441fa
+
+	measure 'Fossil Share %' =
+			
+			DIVIDE ( CALCULATE ( [Generation (MWh)], dim_generation_type[generation_category] = "Fossil" ), [Generation (MWh)] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: c9ae510d-897c-4008-8791-cc9c0f578834
+
+	measure 'Nuclear Share %' =
+			
+			DIVIDE ( CALCULATE ( [Generation (MWh)], dim_generation_type[generation_category] = "Nuclear" ), [Generation (MWh)] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: 6899e3f3-7a2e-497d-820e-25f88fd3e8b6
+
+	measure 'Share of Generation %' =
+			
+			DIVIDE ( [Generation (MWh)], CALCULATE ( [Generation (MWh)], REMOVEFILTERS ( dim_generation_type ) ) )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: a30433cb-16b8-46c2-8c29-fa7d25d0075e
+
+	measure 'Avg Temperature (°C)' = AVERAGE ( fact_load[temperature_c] )
+		formatString: 0.0
+		displayFolder: Weather
+		lineageTag: 8b39c402-5dca-4c6b-91fc-e2a4c3b83e5a
+
+	measure 'Avg Humidity (%)' = AVERAGE ( fact_load[humidity_pct] )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: f3a6579b-056c-446d-b628-40f13a6d4424
+
+	measure 'Avg Wind Speed (km/h)' = AVERAGE ( fact_load[wind_speed_kmh] )
+		formatString: 0.0
+		displayFolder: Weather
+		lineageTag: 40c8eacc-ad53-416a-8c8e-ab26fa55ba04
+
+	measure 'Avg Cloud Cover (%)' = AVERAGE ( fact_load[cloud_cover_pct] )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: 7595572c-263d-4b8f-bdbf-57ba5b01e781
+
+	measure 'Avg Solar Radiation (W/m²)' = AVERAGE ( fact_load[solar_radiation_wm2] )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: c738e991-14cf-42cc-a0b0-768d440e67c3
+
+	measure 'Heating Degree Days' =
+			
+			DIVIDE ( SUM ( fact_load[heating_degree_hours] ), DISTINCTCOUNT ( fact_load[bidding_zone_key] ) )
+		formatString: #,0.0
+		displayFolder: Weather
+		lineageTag: 4a15f280-26a5-4e01-8dde-984ebcdd6234
+
+	measure 'Cooling Degree Days' =
+			
+			DIVIDE ( SUM ( fact_load[cooling_degree_hours] ), DISTINCTCOUNT ( fact_load[bidding_zone_key] ) )
+		formatString: #,0.0
+		displayFolder: Weather
+		lineageTag: 46f8891d-75a5-46e0-b73b-4e707ffd843b
+
+	measure 'Precipitation (mm)' =
+			
+			DIVIDE ( SUM ( fact_load[precipitation_mm] ), DISTINCTCOUNT ( fact_load[bidding_zone_key] ) )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: 52135cb3-3b80-4f08-a96d-1266b919d081
+
+	/// Population of the selected countries: per year the profiles linked to the load facts of that year,
+	/// averaged over the selected years (never summed over years)
+	measure Population =
+			
+			AVERAGEX (
+			    VALUES ( dim_date[year] ),
+			    CALCULATE (
+			        SUMX (
+			            SUMMARIZE ( fact_load, dim_socioeconomic_profile[socioeconomic_profile_key], dim_socioeconomic_profile[population] ),
+			            dim_socioeconomic_profile[population]
+			        )
+			    )
+			)
+		formatString: #,0
+		displayFolder: Socio-economic
+		lineageTag: 1cdb92f1-af5b-41ba-8d86-cf0ec15ab03b
+
+	/// Demand per person per year (average over the selected years). Only country-years with at least 95 % of hours
+	/// covered by load data count, so incomplete data (e.g. Cyprus, parts of Ireland) gives no value instead of a too-low one
+	measure 'Load per Capita (kWh)' =
+			
+			AVERAGEX (
+			    VALUES ( dim_date[year] ),
+			    VAR _complete =
+			        FILTER (
+			            ADDCOLUMNS (
+			                VALUES ( dim_bidding_zone[country_code] ),
+			                "@cov", [Load Coverage %],
+			                "@load", [Actual Load (MWh)],
+			                "@pop", CALCULATE (
+			                    SUMX (
+			                        SUMMARIZE ( fact_load, dim_socioeconomic_profile[socioeconomic_profile_key], dim_socioeconomic_profile[population] ),
+			                        dim_socioeconomic_profile[population]
+			                    )
+			                )
+			            ),
+			            [@cov] >= 0.95
+			        )
+			    RETURN
+			        DIVIDE ( SUMX ( _complete, [@load] ) * 1000, SUMX ( _complete, [@pop] ) )
+			)
+		formatString: #,0
+		displayFolder: Socio-economic
+		lineageTag: f7061911-0ae1-41e8-9200-3bfe38f0be3d
+
+	measure 'GDP per Capita (EUR)' =
+			
+			CALCULATE (
+			    DIVIDE (
+			        SUMX ( dim_socioeconomic_profile,
+			               dim_socioeconomic_profile[gdp_per_capita_eur] * dim_socioeconomic_profile[population] ),
+			        SUMX ( FILTER ( dim_socioeconomic_profile, NOT ISBLANK ( dim_socioeconomic_profile[gdp_per_capita_eur] ) ),
+			               dim_socioeconomic_profile[population] )
+			    ),
+			    fact_load
+			)
+		formatString: #,0
+		displayFolder: Socio-economic
+		lineageTag: 865d7f9f-3950-4efc-bd3d-c3735a1783e4
+
+	measure 'Electricity Price (EUR/kWh)' =
+			
+			CALCULATE (
+			    DIVIDE (
+			        SUMX ( dim_socioeconomic_profile,
+			               dim_socioeconomic_profile[electricity_price_eur_kwh] * dim_socioeconomic_profile[population] ),
+			        SUMX ( FILTER ( dim_socioeconomic_profile, NOT ISBLANK ( dim_socioeconomic_profile[electricity_price_eur_kwh] ) ),
+			               dim_socioeconomic_profile[population] )
+			    ),
+			    fact_load
+			)
+		formatString: 0.0000
+		displayFolder: Socio-economic
+		lineageTag: 664d5189-3514-41d8-a15e-57660011b4da
+
+	measure 'Unemployment Rate' =
+			
+			CALCULATE (
+			    DIVIDE (
+			        SUMX ( dim_socioeconomic_profile,
+			               dim_socioeconomic_profile[unemployment_rate_pct] * dim_socioeconomic_profile[population] ),
+			        SUMX ( FILTER ( dim_socioeconomic_profile, NOT ISBLANK ( dim_socioeconomic_profile[unemployment_rate_pct] ) ),
+			               dim_socioeconomic_profile[population] )
+			    ),
+			    fact_load
+			)
+		formatString: 0.0"%"
+		displayFolder: Socio-economic
+		lineageTag: 1072d81e-ad77-40d8-a683-ab9f424206c4
+
+		annotation PBI_FormatHint = {"isCustom":true}
+
+	measure 'Energy Productivity (EUR/kgoe)' =
+			
+			CALCULATE (
+			    VAR t =
+			        FILTER (
+			            dim_socioeconomic_profile,
+			            NOT ISBLANK ( dim_socioeconomic_profile[energy_intensity] )
+			                && NOT ISBLANK ( dim_socioeconomic_profile[gdp_per_capita_eur] )
+			        )
+			    RETURN
+			        DIVIDE (
+			            SUMX ( t, dim_socioeconomic_profile[gdp_per_capita_eur] * dim_socioeconomic_profile[population] ),
+			            SUMX ( t, DIVIDE ( dim_socioeconomic_profile[gdp_per_capita_eur] * dim_socioeconomic_profile[population],
+			                               dim_socioeconomic_profile[energy_intensity] ) )
+			        ),
+			    fact_load
+			)
+		formatString: 0.00
+		displayFolder: Socio-economic
+		lineageTag: 4c44531c-24c2-4b43-b290-42b6fb18d49a
+
+	measure 'Estimate Note' =
+			
+			IF (
+			    CALCULATE ( COUNTROWS ( dim_socioeconomic_profile ), fact_load, dim_socioeconomic_profile[is_estimated] = "Yes" ) > 0,
+			    "Includes estimates: where Eurostat has not published a year yet, the latest published year is used."
+			)
+		displayFolder: Socio-economic
+		lineageTag: 39416116-5096-4849-8e1a-999c44d04981
+
+	/// Map colour: renewable share in 20 % classes (legend on the Overview map); grey = no data
+	measure 'Renewable Share Colour' =
+			
+			VAR s = [Renewable Share %]
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        ISBLANK ( s ), "#D1D5DB",
+			        s < 0.2, "#EDF8E9",
+			        s < 0.4, "#BAE4B3",
+			        s < 0.6, "#74C476",
+			        s < 0.8, "#31A354",
+			        "#006D2C"
+			    )
+		displayFolder: Generation\Map
+		lineageTag: 6b1e9d42-0c7a-4f3b-a8e5-2d94c1f7b630
+
+	/// "EU, 2023–2025" / "Poland, 2024" / "3 countries, 2024–2025": the current slicer selection as text
+	measure 'Selection Label' =
+			
+			VAR y1 = MIN ( dim_date[year] )
+			VAR y2 = MAX ( dim_date[year] )
+			VAR years = IF ( y1 = y2, FORMAT ( y1, "0" ), y1 & "–" & y2 )
+			VAR nCountries =
+			    COUNTROWS ( FILTER ( VALUES ( dim_bidding_zone[country_name] ), dim_bidding_zone[country_name] <> "Unknown" ) )
+			VAR place =
+			    SWITCH (
+			        TRUE (),
+			        NOT ISFILTERED ( dim_bidding_zone[country_name] ), "EU",
+			        nCountries = 1, SELECTEDVALUE ( dim_bidding_zone[country_name] ),
+			        nCountries & " countries"
+			    )
+			RETURN
+			    place & ", " & years
+		displayFolder: Titles
+		lineageTag: 0d3f6a1e-5b72-4c98-a4e1-7f2c9b8d6e01
+
+	/// Overview map title: renewable share of the selection and the country with the highest share
+	measure 'Title Map' =
+			
+			VAR share = [Renewable Share %]
+			VAR leader =
+			    TOPN (
+			        1,
+			        FILTER ( VALUES ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Renewable Share %] ) ),
+			        [Renewable Share %], DESC
+			    )
+			VAR topName = MAXX ( leader, dim_bidding_zone[country_name] )
+			VAR topShare = CALCULATE ( [Renewable Share %], leader )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        ISBLANK ( share ), "No generation data for this selection",
+			        HASONEVALUE ( dim_bidding_zone[country_name] ),
+			            "Renewables supplied " & FORMAT ( share, "0.0 %" ) & " of " & topName & "'s generation",
+			        "Renewables supplied " & FORMAT ( share, "0.0 %" ) & " of generation; highest share: "
+			            & topName & " (" & FORMAT ( topShare, "0.0 %" ) & ")"
+			    )
+		displayFolder: Titles
+		lineageTag: 1e4a7b2f-6c83-4da9-b5f2-8a3d0c9e7f12
+
+	/// Overview monthly chart title: month with the highest demand
+	measure 'Title Monthly' =
+			
+			VAR peak =
+			    TOPN (
+			        1,
+			        FILTER ( VALUES ( dim_date[Month Label] ), NOT ISBLANK ( [Actual Load (TWh)] ) ),
+			        [Actual Load (TWh)], DESC
+			    )
+			VAR peakMonth = MAXX ( peak, dim_date[Month Label] )
+			VAR peakValue = CALCULATE ( [Actual Load (TWh)], peak )
+			RETURN
+			    IF (
+			        ISBLANK ( peakValue ),
+			        "No load data for this selection",
+			        "Demand peaked in " & peakMonth & " at " & FORMAT ( peakValue, "#,0.0" ) & " TWh"
+			    )
+		displayFolder: Titles
+		lineageTag: 2f5b8c3a-7d94-4eba-86a3-9b4e1dafa023
+
+	/// Overview mix chart title: change of the renewable share between the first and last selected year
+	measure 'Title Mix' =
+			
+			VAR y1 = MIN ( dim_date[year] )
+			VAR y2 = MAX ( dim_date[year] )
+			VAR s1 = CALCULATE ( [Renewable Share %], dim_date[year] = y1 )
+			VAR s2 = CALCULATE ( [Renewable Share %], dim_date[year] = y2 )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        ISBLANK ( s2 ), "No generation data for this selection",
+			        y1 = y2,
+			            "Renewables " & FORMAT ( s2, "0.0 %" ) & ", nuclear " & FORMAT ( [Nuclear Share %], "0.0 %" )
+			                & ", fossil " & FORMAT ( [Fossil Share %], "0.0 %" ) & " in " & y2,
+			        "Renewable share " & IF ( s2 >= s1, "rose", "fell" ) & " from " & FORMAT ( s1, "0.0 %" )
+			            & " in " & y1 & " to " & FORMAT ( s2, "0.0 %" ) & " in " & y2
+			    )
+		displayFolder: Titles
+		lineageTag: 3a6c9d4b-8ea5-4fcb-97b4-ac5f2eb0b134
+
+	/// Average load on the selected type of day relative to working days, compared within each zone
+	/// (holidays differ per country, so EU totals of holiday hours would mix different sets of zones);
+	/// zones are weighted by their working-day load
+	measure 'Load vs Working Days %' =
+			
+			VAR zones =
+			    ADDCOLUMNS (
+			        VALUES ( dim_bidding_zone[bidding_zone_key] ),
+			        "@cur", CALCULATE ( AVERAGE ( fact_load[actual_load_mwh] ) ),
+			        "@wd", CALCULATE ( AVERAGE ( fact_load[actual_load_mwh] ), fact_load[Day Type] = "Working day" )
+			    )
+			VAR valid = FILTER ( zones, NOT ISBLANK ( [@cur] ) && NOT ISBLANK ( [@wd] ) )
+			RETURN
+			    DIVIDE ( SUMX ( valid, [@cur] ), SUMX ( valid, [@wd] ) )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Load
+		lineageTag: 5c8e1f6d-0a27-4b3c-9d64-be7a3fc2d245
+
+	/// Load & forecast page: overall forecast error and bias
+	measure 'Title Forecast' =
+			
+			VAR e = [Forecast Error %]
+			VAR b = [Forecast Bias %]
+			RETURN
+			    IF (
+			        ISBLANK ( e ),
+			        "No forecast data for this selection",
+			        "Day-ahead forecasts missed actual demand by " & FORMAT ( e, "0.0 %" ) & " on average; "
+			            & IF (
+			                ABS ( b ) < 0.001,
+			                "no overall bias",
+			                "too " & IF ( b < 0, "low", "high" ) & " by " & FORMAT ( ABS ( b ), "0.0 %" ) & " overall"
+			            )
+			    )
+		displayFolder: Titles
+		lineageTag: 6d9f2a7e-1b38-4c4d-8e75-cf8b4ad3e356
+
+	/// Load & forecast page: most and least accurate country
+	measure 'Title Forecast Country' =
+			
+			VAR withForecast =
+			    FILTER ( VALUES ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Forecast Error %] ) )
+			VAR best = TOPN ( 1, withForecast, [Forecast Error %], ASC )
+			VAR worst = TOPN ( 1, withForecast, [Forecast Error %], DESC )
+			RETURN
+			    IF (
+			        COUNTROWS ( withForecast ) < 2,
+			        "Forecast error by country",
+			        "Most accurate: " & MAXX ( best, dim_bidding_zone[country_name] ) & " ("
+			            & FORMAT ( CALCULATE ( [Forecast Error %], best ), "0.0 %" ) & "); least accurate: "
+			            & MAXX ( worst, dim_bidding_zone[country_name] ) & " ("
+			            & FORMAT ( CALCULATE ( [Forecast Error %], worst ), "0.0 %" ) & ")"
+			    )
+		displayFolder: Titles
+		lineageTag: 7ea03b8f-2c49-4d5e-9f86-d09c5be4f467
+
+	/// Load & forecast page: peak weekday and hour, and the largest relative difference shown by the heatmap
+	measure 'Title Heatmap' =
+			
+			VAR grid =
+			    ADDCOLUMNS (
+			        CROSSJOIN ( VALUES ( dim_date[day_name] ), VALUES ( dim_time[Hour (UTC)] ) ),
+			        "@load", [Average Load (MW)]
+			    )
+			VAR peak = TOPN ( 1, grid, [@load], DESC )
+			VAR peakLoad = MAXX ( peak, [@load] )
+			RETURN
+			    IF (
+			        ISBLANK ( peakLoad ),
+			        "Average demand by weekday and hour (UTC)",
+			        "Demand peaks on " & MAXX ( peak, dim_date[day_name] ) & "s at " & MAXX ( peak, dim_time[Hour (UTC)] )
+			            & " UTC; the weekday-hour averages differ by at most " & FORMAT ( [Heatmap Spread %], "0 %" )
+			    )
+		displayFolder: Titles
+		lineageTag: 8fb14c90-3d5a-4e6f-a097-e1ad6cf5a578
+
+	/// Load & forecast page: weekend and holiday demand relative to working days
+	measure 'Title Day Type' =
+			
+			VAR weekend = CALCULATE ( [Load vs Working Days %], fact_load[Day Type] = "Weekend" )
+			VAR holiday = CALCULATE ( [Load vs Working Days %], fact_load[Day Type] = "Public holiday" )
+			RETURN
+			    IF (
+			        ISBLANK ( weekend ),
+			        "Demand by type of day, relative to working days",
+			        "Demand is " & FORMAT ( 1 - weekend, "0 %" ) & " lower on weekends"
+			            & IF ( ISBLANK ( holiday ), "", " and " & FORMAT ( 1 - holiday, "0 %" ) & " lower on public holidays" )
+			    )
+		displayFolder: Titles
+		lineageTag: 90c25da1-4e6b-4f70-b1a8-f2be7d06b689
+
+	measure 'Average Load (GW)' =
+			
+			DIVIDE ( [Average Load (MW)], 1000 )
+		formatString: #,0
+		displayFolder: Load
+		lineageTag: e517acf6-93b4-44c5-a6fd-47032c5b01e4
+
+	/// Forecast error or bias, as chosen with the buttons on the Load & forecast page
+	measure 'Forecast Metric Value' =
+			
+			SWITCH (
+			    SELECTEDVALUE ( 'Forecast Metric'[Metric], "Error" ),
+			    "Bias", [Forecast Bias %],
+			    [Forecast Error %]
+			)
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Load\Forecast
+		lineageTag: f628bd07-a4c5-45d6-b70e-58143d6c12f5
+
+	/// Column colour: bias green when the forecast was too high, red when too low; error navy
+	measure 'Forecast Metric Colour' =
+			
+			VAR v = [Forecast Metric Value]
+			RETURN
+			    IF (
+			        SELECTEDVALUE ( 'Forecast Metric'[Metric], "Error" ) = "Bias",
+			        IF ( v < 0, "#C62828", "#2E7D32" ),
+			        "#0E2A5C"
+			    )
+		displayFolder: Load\Forecast
+		lineageTag: 0739ce18-b5d6-46e7-c81f-69254e7d23f6
+
+	measure 'Subtitle Forecast' =
+			
+			IF (
+			    SELECTEDVALUE ( 'Forecast Metric'[Metric], "Error" ) = "Bias",
+			    "Per month: Σ(forecast − actual) / Σ actual. Green = forecast too high, red = forecast too low",
+			    "Per month: Σ|forecast − actual| / Σ actual, hours with both forecast and actual value"
+			)
+		displayFolder: Titles
+		lineageTag: 184adf29-c6e7-47f8-d920-7a365e8f34f7
+
+	/// Highest weekday-hour average of the selection: top of the heatmap colour scale (bottom is 0)
+	measure 'Heatmap Max (GW)' =
+			
+			MAXX (
+			    CROSSJOIN ( ALLSELECTED ( dim_date[day_name] ), ALLSELECTED ( dim_time[Hour] ) ),
+			    [Average Load (GW)]
+			)
+		formatString: #,0
+		displayFolder: Load\Heatmap
+		lineageTag: 295be03a-d7f8-4809-ea31-8b476f9a45f8
+
+	/// Lowest weekday-hour average of the selection (white end of the heatmap colour scale)
+	measure 'Heatmap Min (GW)' =
+			
+			MINX (
+			    CROSSJOIN ( ALLSELECTED ( dim_date[day_name] ), ALLSELECTED ( dim_time[Hour] ) ),
+			    [Average Load (GW)]
+			)
+		formatString: #,0
+		displayFolder: Load\Heatmap
+		lineageTag: 5c8e2a6d-0b3f-4c4d-9e7a-1f2b3c4d5e6f
+
+	/// (max - min) / max of the weekday-hour averages: how much the heatmap colours actually differ
+	measure 'Heatmap Spread %' =
+			
+			DIVIDE ( [Heatmap Max (GW)] - [Heatmap Min (GW)], [Heatmap Max (GW)] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Load\Heatmap
+		lineageTag: 6d9f3b7e-1c40-4d5e-8f8b-2a3c4d5e6f70
+
+	measure 'Subtitle Heatmap' =
+			
+			"Average demand by weekday and hour (UTC). White = lowest (" & FORMAT ( [Heatmap Min (GW)], "#,0" )
+			    & " GW), dark blue = highest (" & FORMAT ( [Heatmap Max (GW)], "#,0" ) & " GW)"
+		displayFolder: Titles
+		lineageTag: 7ea04c8f-2d51-4e6f-9a9c-3b4d5e6f7081
+
+	/// Heatmap cell content: empty text, so column widths never depend on the numbers;
+	/// the colour comes from Average Load (GW) and the value is shown in the tooltip
+	measure 'Heatmap Cell' = IF ( ISBLANK ( [Average Load (GW)] ), BLANK (), "" )
+		displayFolder: Load\Heatmap
+		lineageTag: 8fb25d90-3e6a-4f7b-a0ad-4c5e6f708192
+
+	/// Average generation per hour of the selection, GW (with an hour on the axis: the average of that hour)
+	measure 'Average Generation (GW)' =
+			
+			DIVIDE (
+			    AVERAGEX ( CROSSJOIN ( VALUES ( dim_date[date_key] ), VALUES ( dim_time[time_key] ) ), [Generation (MWh)] ),
+			    1000
+			)
+		formatString: #,0.0
+		displayFolder: Generation
+		lineageTag: a0b1c2d3-0001-4e5f-8a9b-000000000001
+
+	measure 'Heating Degree Days per Year' =
+			
+			DIVIDE ( [Heating Degree Days], DISTINCTCOUNT ( dim_date[year] ) )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: a0b1c2d3-0002-4e5f-8a9b-000000000002
+
+	measure 'Cooling Degree Days per Year' =
+			
+			DIVIDE ( [Cooling Degree Days], DISTINCTCOUNT ( dim_date[year] ) )
+		formatString: #,0
+		displayFolder: Weather
+		lineageTag: a0b1c2d3-0003-4e5f-8a9b-000000000003
+
+	/// Pearson correlation between daily average temperature and daily demand
+	measure 'Load Temperature r' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Temperature (°C)], "@y", [Actual Load (MWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			VAR _sxy = SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) )
+			VAR _sxx = SUMX ( _days, ( [@x] - _mx ) ^ 2 )
+			VAR _syy = SUMX ( _days, ( [@y] - _my ) ^ 2 )
+			RETURN
+			    DIVIDE ( _sxy, SQRT ( _sxx * _syy ) )
+		formatString: 0.00
+		displayFolder: Weather
+		lineageTag: a0b1c2d3-0004-4e5f-8a9b-000000000004
+
+	/// Linear fit of daily demand on temperature: change of demand per +1 °C, relative to the average day
+	measure 'Load Change per °C %' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Temperature (°C)], "@y", [Actual Load (MWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			VAR _slope = DIVIDE ( SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) ), SUMX ( _days, ( [@x] - _mx ) ^ 2 ) )
+			RETURN
+			    DIVIDE ( _slope, _my )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Weather
+		lineageTag: a0b1c2d3-0005-4e5f-8a9b-000000000005
+
+	/// Generation mix page: solar peak hour
+	measure 'Title Gen Profile' =
+			
+			VAR _hours =
+			    ADDCOLUMNS (
+			        VALUES ( dim_time[Hour (UTC)] ),
+			        "@solar", CALCULATE ( [Average Generation (GW)], dim_generation_type[generation_type_name] = "Solar" ),
+			        "@all", CALCULATE ( [Average Generation (GW)], REMOVEFILTERS ( dim_generation_type ) )
+			    )
+			VAR _peak = TOPN ( 1, FILTER ( _hours, NOT ISBLANK ( [@solar] ) ), [@solar], DESC )
+			VAR _solar = MAXX ( _peak, [@solar] )
+			RETURN
+			    IF (
+			        ISBLANK ( _solar ) || _solar = 0,
+			        "Average generation by hour of day (UTC) and source",
+			        "Solar output peaks at " & MAXX ( _peak, dim_time[Hour (UTC)] ) & " UTC, covering "
+			            & FORMAT ( DIVIDE ( _solar, MAXX ( _peak, [@all] ) ), "0 %" ) & " of generation in that hour"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0006-4e5f-8a9b-000000000006
+
+	/// Generation mix page: largest production type
+	measure 'Title Gen Types' =
+			
+			VAR _types =
+			    FILTER (
+			        VALUES ( dim_generation_type[generation_type_name] ),
+			        dim_generation_type[generation_type_name] <> "Unknown" && NOT ISBLANK ( [Generation (MWh)] )
+			    )
+			VAR _lead = TOPN ( 1, _types, [Generation (MWh)], DESC )
+			VAR _name = MAXX ( _lead, dim_generation_type[generation_type_name] )
+			RETURN
+			    IF (
+			        ISBLANK ( _name ),
+			        "Generation by production type",
+			        "Largest source: " & _name & " (" & FORMAT ( CALCULATE ( [Generation (TWh)], _lead ), "#,0" ) & " TWh, "
+			            & FORMAT ( CALCULATE ( [Share of Generation %], _lead ), "0.0 %" ) & " of generation)"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0007-4e5f-8a9b-000000000007
+
+	/// Generation mix page: lowest and highest month
+	measure 'Title Renewable Month' =
+			
+			VAR _months =
+			    FILTER ( ADDCOLUMNS ( VALUES ( dim_date[Month Label] ), "@s", [Renewable Share %] ), NOT ISBLANK ( [@s] ) )
+			VAR _low = TOPN ( 1, _months, [@s], ASC )
+			VAR _high = TOPN ( 1, _months, [@s], DESC )
+			RETURN
+			    IF (
+			        COUNTROWS ( _months ) < 2,
+			        "Renewable share of generation per month",
+			        "Renewable share ranged from " & FORMAT ( MAXX ( _low, [@s] ), "0 %" ) & " (" & MAXX ( _low, dim_date[Month Label] )
+			            & ") to " & FORMAT ( MAXX ( _high, [@s] ), "0 %" ) & " (" & MAXX ( _high, dim_date[Month Label] ) & ")"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0008-4e5f-8a9b-000000000008
+
+	/// Generation mix page: lowest and highest country
+	measure 'Title Gen Country' =
+			
+			VAR _countries =
+			    FILTER ( ADDCOLUMNS ( VALUES ( dim_bidding_zone[country_name] ), "@s", [Renewable Share %] ), NOT ISBLANK ( [@s] ) )
+			VAR _low = TOPN ( 1, _countries, [@s], ASC )
+			VAR _high = TOPN ( 1, _countries, [@s], DESC )
+			RETURN
+			    IF (
+			        COUNTROWS ( _countries ) < 2,
+			        "Generation mix by country",
+			        "Renewable share ranges from " & FORMAT ( MAXX ( _low, [@s] ), "0 %" ) & " ("
+			            & MAXX ( _low, dim_bidding_zone[country_name] ) & ") to " & FORMAT ( MAXX ( _high, [@s] ), "0 %" ) & " ("
+			            & MAXX ( _high, dim_bidding_zone[country_name] ) & ")"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0009-4e5f-8a9b-000000000009
+
+	/// Weather page: temperature sensitivity of demand
+	measure 'Title Temperature' =
+			
+			VAR _r = [Load Temperature r]
+			VAR _k = [Load Change per °C %]
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        ISBLANK ( _r ), "Daily demand and temperature",
+			        _r <= -0.3,
+			            "Colder days mean higher demand: about " & FORMAT ( -_k, "0.0 %" ) & " more per 1 °C colder (r = "
+			                & FORMAT ( _r, "0.00" ) & ")",
+			        _r >= 0.3,
+			            "Warmer days mean higher demand: about " & FORMAT ( _k, "0.0 %" ) & " more per 1 °C warmer (r = "
+			                & FORMAT ( _r, "0.00" ) & ")",
+			        "Daily demand depends little on temperature (r = " & FORMAT ( _r, "0.00" ) & ")"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0010-4e5f-8a9b-000000000010
+
+	/// Weather page: coldest and warmest country
+	measure 'Title Degree Days' =
+			
+			VAR _countries =
+			    FILTER (
+			        ADDCOLUMNS (
+			            VALUES ( dim_bidding_zone[country_name] ),
+			            "@h", [Heating Degree Days per Year],
+			            "@c", [Cooling Degree Days per Year]
+			        ),
+			        NOT ISBLANK ( [@h] )
+			    )
+			VAR _heat = TOPN ( 1, _countries, [@h], DESC )
+			VAR _cool = TOPN ( 1, _countries, [@c], DESC )
+			RETURN
+			    IF (
+			        COUNTROWS ( _countries ) < 2,
+			        "Heating and cooling degree days per year",
+			        "Most heating needed: " & MAXX ( _heat, dim_bidding_zone[country_name] ) & " ("
+			            & FORMAT ( MAXX ( _heat, [@h] ), "#,0" ) & " HDD/year); most cooling: "
+			            & MAXX ( _cool, dim_bidding_zone[country_name] ) & " (" & FORMAT ( MAXX ( _cool, [@c] ), "#,0" ) & " CDD/year)"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0011-4e5f-8a9b-000000000011
+
+	/// Weather page: highest and lowest demand per person
+	measure 'Title Per Capita' =
+			
+			VAR _countries =
+			    FILTER ( ADDCOLUMNS ( VALUES ( dim_bidding_zone[country_name] ), "@v", [Load per Capita (kWh)] ), NOT ISBLANK ( [@v] ) )
+			VAR _low = TOPN ( 1, _countries, [@v], ASC )
+			VAR _high = TOPN ( 1, _countries, [@v], DESC )
+			RETURN
+			    IF (
+			        COUNTROWS ( _countries ) < 2,
+			        "Electricity demand per person and GDP per person",
+			        "Demand per person is highest in " & MAXX ( _high, dim_bidding_zone[country_name] ) & " ("
+			            & FORMAT ( MAXX ( _high, [@v] ), "#,0" ) & " kWh) and lowest in " & MAXX ( _low, dim_bidding_zone[country_name] )
+			            & " (" & FORMAT ( MAXX ( _low, [@v] ), "#,0" ) & " kWh)"
+			    )
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0012-4e5f-8a9b-000000000012
+
+	/// Weather page: profile table subtitle
+	measure 'Subtitle Profile' =
+			
+			COALESCE (
+			    [Estimate Note],
+			    "Eurostat figures for the selected years; groups of countries are population-weighted"
+			)
+		displayFolder: Titles
+		lineageTag: a0b1c2d3-0013-4e5f-8a9b-000000000013
+
+	/// Rank of a production type by generation in the selection (1 = largest)
+	measure 'Type Rank' =
+			
+			IF (
+			    HASONEVALUE ( dim_generation_type[generation_type_name] ),
+			    RANKX (
+			        FILTER ( ALLSELECTED ( dim_generation_type[generation_type_name] ), dim_generation_type[generation_type_name] <> "Unknown" ),
+			        CALCULATE ( [Generation (MWh)], ALLSELECTED ( dim_generation_type[generation_category] ) ),
+			        ,
+			        DESC
+			    )
+			)
+		formatString: 0
+		displayFolder: Generation\Table
+		lineageTag: b1c2d3e4-0001-4f5a-9b8c-000000000101
+
+	/// Generation of the 10 largest production types only (others blank, so the table hides them)
+	measure 'Top 10 Generation (TWh)' =
+			
+			IF ( [Type Rank] <= 10, [Generation (TWh)] )
+		formatString: #,0.0
+		displayFolder: Generation\Table
+		lineageTag: b1c2d3e4-0002-4f5a-9b8c-000000000102
+
+	/// Share of all generation, for the 10 largest production types only
+	measure 'Top 10 Share %' =
+			
+			IF ( [Type Rank] <= 10, [Share of Generation %] )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation\Table
+		lineageTag: b1c2d3e4-0003-4f5a-9b8c-000000000103
+
+	measure 'Subtitle Gen Types' =
+			
+			VAR _types =
+			    FILTER (
+			        VALUES ( dim_generation_type[generation_type_name] ),
+			        dim_generation_type[generation_type_name] <> "Unknown" && NOT ISBLANK ( [Generation (MWh)] )
+			    )
+			VAR _top = FILTER ( _types, [Type Rank] <= 10 )
+			RETURN
+			    "Top " & COUNTROWS ( _top ) & " of " & COUNTROWS ( _types ) & " production types, together "
+			        & FORMAT ( SUMX ( _top, [Share of Generation %] ), "0 %" ) & " of all generation"
+		displayFolder: Titles
+		lineageTag: b1c2d3e4-0004-4f5a-9b8c-000000000104
+
+	partition _Measures = m
+		mode: import
+		source =
+				let
+				    Source = Table.FromRows(Json.Document(Binary.Decompress(Binary.FromText("i44FAA==", BinaryEncoding.Base64), Compression.Deflate)), let _t = ((type nullable text) meta [Serialized.Text = true]) in type table [Column1 = _t]),
+				    #"Changed Type" = Table.TransformColumnTypes(Source,{{"Column1", type text}}),
+				    #"Removed Columns" = Table.RemoveColumns(#"Changed Type",{"Column1"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_ResultType = Table
+
+	annotation PBI_NavigationStepName = Navigation
+

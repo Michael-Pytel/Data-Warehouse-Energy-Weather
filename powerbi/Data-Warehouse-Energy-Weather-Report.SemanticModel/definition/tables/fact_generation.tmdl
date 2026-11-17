@@ -1,0 +1,95 @@
+table fact_generation
+	lineageTag: 5af641bf-efcf-4905-acfe-7925bc2eb0a6
+
+	column date_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: dc27de62-a21e-4340-af96-ba75cddc9c22
+		summarizeBy: none
+		sourceColumn: date_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column time_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 3676b2dc-3494-41e1-9711-b9527d2bed78
+		summarizeBy: none
+		sourceColumn: time_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column bidding_zone_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 33e4158c-3be4-476e-821e-202c9b4ca11f
+		summarizeBy: none
+		sourceColumn: bidding_zone_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column socioeconomic_profile_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 98477b35-07eb-4828-beeb-ff15c1962a32
+		summarizeBy: none
+		sourceColumn: socioeconomic_profile_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column generation_type_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: be0b96ab-605f-469f-af3f-c45bc055c533
+		summarizeBy: none
+		sourceColumn: generation_type_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_public_holiday
+		dataType: string
+		lineageTag: 59fa11aa-fc97-414f-8f97-da9118508b42
+		summarizeBy: none
+		sourceColumn: is_public_holiday
+
+		annotation SummarizationSetBy = Automatic
+
+	column generation_mwh
+		dataType: double
+		lineageTag: bdd987c4-f15e-4608-9260-850a35cf5667
+		summarizeBy: sum
+		sourceColumn: generation_mwh
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	partition fact_generation = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_fact_generation = Source{[Schema="dbo",Item="fact_generation"]}[Data],
+				    #"Removed Columns" = Table.RemoveColumns(dbo_fact_generation,{"loaded_at", "updated_at"})
+				in
+				    #"Removed Columns"
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

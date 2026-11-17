@@ -1,0 +1,46 @@
+table dim_time
+	lineageTag: 1bf102aa-b419-4eaa-a8c6-9e0dc5b9b3c1
+
+	column time_key
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: 822fe27a-0719-4822-aaae-799be7d854de
+		summarizeBy: none
+		sourceColumn: time_key
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Hour (UTC)'
+		dataType: string
+		lineageTag: 8836c8a0-f8e4-48bd-9b39-8ae34e7ed455
+		summarizeBy: none
+		sourceColumn: Hour (UTC)
+		sortByColumn: time_key
+
+		changedProperty = SortByColumn
+
+		annotation SummarizationSetBy = Automatic
+
+	column Hour = FORMAT ( dim_time[time_key], "00" )
+		dataType: string
+		lineageTag: a1d36eb2-5f7c-4081-c2b9-03cf8e17c7a0
+		summarizeBy: none
+		sortByColumn: time_key
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_time = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("localhost", "EnergyWeatherDW"),
+				    dbo_dim_time = Source{[Schema="dbo",Item="dim_time"]}[Data],
+				    #"Renamed Columns" = Table.RenameColumns(dbo_dim_time,{{"hour_label", "Hour (UTC)"}})
+				in
+				    #"Renamed Columns"
+
+	annotation PBI_ResultType = Table
+

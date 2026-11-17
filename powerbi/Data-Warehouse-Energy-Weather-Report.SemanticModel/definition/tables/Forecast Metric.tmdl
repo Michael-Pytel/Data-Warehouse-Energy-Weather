@@ -1,0 +1,29 @@
+/// Values of the error / bias buttons on the Load & forecast page (not related to other tables)
+table 'Forecast Metric'
+	lineageTag: b2e47fc3-6081-4192-d3ca-14d0f928d8b1
+
+	column Metric
+		dataType: string
+		lineageTag: c3f58ad4-7192-42a3-e4db-25e10a39e9c2
+		summarizeBy: none
+		sourceColumn: [Metric]
+		sortByColumn: Order
+
+		annotation SummarizationSetBy = Automatic
+
+	column Order
+		dataType: int64
+		isHidden
+		formatString: 0
+		lineageTag: d4069be5-82a3-43b4-f5ec-36f21b4af0d3
+		summarizeBy: none
+		sourceColumn: [Order]
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Forecast Metric' = calculated
+		mode: import
+		source = DATATABLE ( "Metric", STRING, "Order", INTEGER, { { "Error", 1 }, { "Bias", 2 } } )
+
+	annotation PBI_Id = 5f2a7c1e0b9d4e3f8a6b2c1d0e9f8a7b
+
