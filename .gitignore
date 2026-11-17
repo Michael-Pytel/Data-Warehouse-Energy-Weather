@@ -24,13 +24,16 @@ ssis/obj/
 *.user
 *.suo
 
-# Power BI binary report (~400 MB, over GitHub's 100 MB limit).
-# Publish it to the Power BI service, or save it as a .pbip project to version it.
+# Power BI: the old binary report (~400 MB, over GitHub's 100 MB limit) stays local;
+# the report is versioned as a Power BI project (.pbip). Its data cache and user settings stay local.
 *.pbix
+**/.pbi/cache.abf
+**/.pbi/localSettings.json
 
 # Local working notes (kept out of the repo)
 CLAUDE.md
 docs/PLAN.md
+docs/POWERBI_REPORT.md
 
 # OS / misc
 *.lnk
