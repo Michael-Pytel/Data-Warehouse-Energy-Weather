@@ -113,9 +113,9 @@ EXEC dbo.usp_load_facts;        -- task 7 Load Facts
 python fix_null_values.py                                      # task 8 Key Check
 ```
 
-The console output also goes to `etl/log/`. Run the Eurostat extract **without** a country list and with
-`SinceYear` before the loaded period: the dimension load currently treats countries or years missing from
-the Eurostat staging data as having no figures and would store empty versions for them.
+The console output also goes to `etl/log/`. The Eurostat extract can be run for a subset of countries or a
+later `SinceYear`: the dimension load only rebuilds the country-years the Eurostat staging data covers, keeps
+the current version of all others, and never replaces a stored figure by NULL.
 
 ## Checking a run
 
