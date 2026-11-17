@@ -1,0 +1,102 @@
+{
+  "name": "Energy Weather",
+  "dataColors": [
+    "#0E2A5C",
+    "#2E7D32",
+    "#64748B",
+    "#7C6BB0",
+    "#4A90D9",
+    "#CBD5E1",
+    "#E0A800",
+    "#C62828"
+  ],
+  "foreground": "#0E2A5C",
+  "foregroundNeutralSecondary": "#5B6B82",
+  "foregroundNeutralTertiary": "#94A3B8",
+  "background": "#FFFFFF",
+  "backgroundLight": "#F5F7FB",
+  "backgroundNeutral": "#E3E8F2",
+  "tableAccent": "#0E2A5C",
+  "good": "#2E7D32",
+  "neutral": "#E0A800",
+  "bad": "#C62828",
+  "maximum": "#006D2C",
+  "center": "#74C476",
+  "minimum": "#EDF8E9",
+  "textClasses": {
+    "callout": { "fontSize": 32, "fontFace": "Segoe UI Semibold", "color": "#0E2A5C" },
+    "title": { "fontSize": 14, "fontFace": "Segoe UI Semibold", "color": "#0E2A5C" },
+    "header": { "fontSize": 12, "fontFace": "Segoe UI Semibold", "color": "#1E3A6E" },
+    "label": { "fontSize": 11, "fontFace": "Segoe UI", "color": "#5B6B82" }
+  },
+  "visualStyles": {
+    "*": {
+      "*": {
+        "background": [{ "show": true, "color": { "solid": { "color": "#FFFFFF" } }, "transparency": 0 }],
+        "border": [{ "show": true, "color": { "solid": { "color": "#E3E8F2" } }, "radius": 10 }],
+        "dropShadow": [{ "show": false }],
+        "padding": [{ "top": 12, "bottom": 12, "left": 16, "right": 16 }],
+        "title": [{
+          "show": true,
+          "fontFamily": "Segoe UI Semibold",
+          "fontSize": 14,
+          "fontColor": { "solid": { "color": "#0E2A5C" } },
+          "alignment": "left"
+        }],
+        "subTitle": [{
+          "show": false,
+          "fontSize": 11,
+          "fontColor": { "solid": { "color": "#5B6B82" } }
+        }],
+        "categoryAxis": [{
+          "showAxisTitle": false,
+          "gridlineShow": false,
+          "fontSize": 10,
+          "labelColor": { "solid": { "color": "#5B6B82" } }
+        }],
+        "valueAxis": [{
+          "showAxisTitle": false,
+          "gridlineShow": true,
+          "gridlineColor": { "solid": { "color": "#EDF1F7" } },
+          "gridlineStyle": "dotted",
+          "fontSize": 10,
+          "labelColor": { "solid": { "color": "#5B6B82" } }
+        }],
+        "legend": [{
+          "show": true,
+          "position": "Top",
+          "fontSize": 10,
+          "labelColor": { "solid": { "color": "#3B4A63" } }
+        }]
+      }
+    },
+    "page": {
+      "*": {
+        "background": [{ "color": { "solid": { "color": "#F5F7FB" } }, "transparency": 0 }],
+        "outspace": [{ "color": { "solid": { "color": "#E9EEF6" } }, "transparency": 0 }]
+      }
+    },
+    "textbox": {
+      "*": {
+        "background": [{ "show": false }],
+        "border": [{ "show": false }]
+      }
+    },
+    "slicer": {
+      "*": {
+        "background": [{ "show": false }],
+        "border": [{ "show": false }]
+      }
+    },
+    "lineChart": {
+      "*": {
+        "lineStyles": [{ "strokeWidth": 3, "showMarker": false }]
+      }
+    },
+    "areaChart": {
+      "*": {
+        "lineStyles": [{ "strokeWidth": 2, "showMarker": false }]
+      }
+    }
+  }
+}
