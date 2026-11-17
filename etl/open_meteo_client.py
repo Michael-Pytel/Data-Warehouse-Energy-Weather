@@ -20,11 +20,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Parallel requests to the archive API (free tier: 600 calls/minute)
 MAX_WORKERS = 8
 
-# Base temperature for heating/cooling degree days (°C)
-HDD_CDD_BASE_TEMP = 18.0
-
 # WMO weather interpretation codes (Open-Meteo `weather_code`) mapped to the condition types
-# of dim_weather_condition (see dimension_processor.py). Unlisted codes become 'Unknown'.
+# of dim_weather_condition (see database/create_warehouse.sql). Unlisted codes become 'Unknown'.
 WMO_CONDITIONS = {
     0: 'Clear', 1: 'Clear',                     # clear sky, mainly clear
     2: 'Partly Cloudy', 3: 'Overcast',
@@ -298,13 +295,6 @@ class OpenMeteoClient:
             'shortwave_radiation': 'solar_radiation',  # W/m², mean of the preceding hour
             'weather_code': 'weather_code',            # WMO weather interpretation code
         }
-
-        # Open-Meteo daily variable -> staging column (days are UTC days, see timezone below)
-        self.daily_params = {
-            'temperature_2m_max': 'temperature_max',
-            'temperature_2m_min': 'temperature_min',
-            'temperature_2m_mean': 'temperature_mean',
-        }
     
     def _make_request(self, url: str, params: Dict, max_retries: int = 3) -> Optional[Dict]:
         """
@@ -339,15 +329,13 @@ class OpenMeteoClient:
         return None
     
     def fetch_location(self, country_code: str, zone_name: str, subzone: Dict,
-                       start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                       start_date: datetime, end_date: datetime) -> pd.DataFrame:
         """
-        Fetch hourly weather and daily temperatures for one city from the archive API
-        (real historical weather) in a single request.
-
-        All timestamps and days are UTC (timezone=GMT), matching the ENTSO-E data.
+        Fetch hourly weather for one city from the archive API (real historical weather).
+        All timestamps are UTC (timezone=GMT), matching the ENTSO-E data.
 
         Returns:
-            (hourly weather DataFrame, daily climate DataFrame); empty DataFrames on failure
+            hourly weather DataFrame; empty DataFrame on failure
         """
         params = {
             'latitude': subzone['lat'],
@@ -355,58 +343,31 @@ class OpenMeteoClient:
             'start_date': start_date.strftime('%Y-%m-%d'),
             'end_date': end_date.strftime('%Y-%m-%d'),
             'hourly': ','.join(self.hourly_params),
-            'daily': ','.join(self.daily_params),
             'timezone': 'GMT',
         }
 
         response_data = self._make_request(self.base_url, params)
-        if not response_data or 'hourly' not in response_data or 'daily' not in response_data:
+        if not response_data or 'hourly' not in response_data:
             self.logger.warning(f"No weather data received for {subzone['name']}")
-            return pd.DataFrame(), pd.DataFrame()
-
-        location = {
-            'latitude': subzone['lat'],
-            'longitude': subzone['lon'],
-            'subzone_code': subzone['subzone_code'],
-            'subzone_name': subzone['name'],
-            'country_code': country_code,
-            'zone_name': zone_name,
-        }
+            return pd.DataFrame()
 
         hourly = response_data['hourly']
         weather_df = pd.DataFrame({column: hourly.get(api_param) for api_param, column in self.hourly_params.items()})
         weather_df.insert(0, 'timestamp', pd.to_datetime(hourly['time']))
-        weather_df = weather_df.assign(**location)
-        weather_df = self._calculate_derived_metrics(weather_df)
+        weather_df = weather_df.assign(
+            latitude=subzone['lat'],
+            longitude=subzone['lon'],
+            subzone_code=subzone['subzone_code'],
+            subzone_name=subzone['name'],
+            country_code=country_code,
+            zone_name=zone_name,
+        )
+        # Weather condition from the official WMO code (unknown codes -> 'Unknown')
+        weather_df['weather_condition'] = weather_df['weather_code'].map(WMO_CONDITIONS).fillna('Unknown')
+        return weather_df
 
-        daily = response_data['daily']
-        climate_df = pd.DataFrame({column: daily.get(api_param) for api_param, column in self.daily_params.items()})
-        climate_df.insert(0, 'date', pd.to_datetime(daily['time']))
-        climate_df = climate_df.assign(**location)
-        # Degree days from the real daily mean temperature (base 18 °C)
-        climate_df['heating_degree_days'] = (HDD_CDD_BASE_TEMP - climate_df['temperature_mean']).clip(lower=0)
-        climate_df['cooling_degree_days'] = (climate_df['temperature_mean'] - HDD_CDD_BASE_TEMP).clip(lower=0)
-
-        return weather_df, climate_df
-
-    def _calculate_derived_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add the weather condition (from the WMO code) and daily min/max temperature per UTC day."""
-        if df.empty:
-            return df
-
-        df['weather_condition'] = df['weather_code'].map(WMO_CONDITIONS).fillna('Unknown')
-
-        df['date'] = df['timestamp'].dt.date
-        daily_temps = df.groupby('date')['temperature_avg'].agg(temperature_min='min', temperature_max='max')
-        return df.merge(daily_temps, left_on='date', right_index=True, how='left')
-
-    def extract_all(self, start_date: datetime, end_date: datetime) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Fetch weather and climate data for all cities in parallel.
-
-        Returns:
-            (weather DataFrame, climate DataFrame)
-        """
+    def extract_all(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Fetch hourly weather for all cities in parallel."""
         cities = [(country_code, zone_info['name'], subzone)
                   for country_code, zone_info in self.weather_locations.items()
                   for subzone in zone_info['subzones']]
@@ -418,29 +379,27 @@ class OpenMeteoClient:
         except Exception as e:
             self.logger.warning(f"Error logging process: {str(e)}")
 
-        weather_parts, climate_parts, failed = [], [], []
+        parts, failed = [], []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(self.fetch_location, country_code, zone_name, subzone, start_date, end_date): subzone['name']
                        for country_code, zone_name, subzone in cities}
             for future in as_completed(futures):
                 city = futures[future]
                 try:
-                    weather_df, climate_df = future.result()
+                    weather_df = future.result()
                 except Exception as e:
                     self.logger.error(f"Error fetching weather for {city}: {str(e)}")
-                    weather_df, climate_df = pd.DataFrame(), pd.DataFrame()
+                    weather_df = pd.DataFrame()
                 if weather_df.empty:
                     failed.append(city)
-                    continue
-                weather_parts.append(weather_df)
-                climate_parts.append(climate_df)
+                else:
+                    parts.append(weather_df)
 
         if failed:
             self.logger.warning(f"No data for {len(failed)} cities: {', '.join(sorted(failed))}")
 
-        weather_data = pd.concat(weather_parts, ignore_index=True) if weather_parts else pd.DataFrame()
-        climate_data = pd.concat(climate_parts, ignore_index=True) if climate_parts else pd.DataFrame()
-        self.logger.info(f"Extracted {len(weather_data)} weather and {len(climate_data)} climate records")
+        weather_data = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        self.logger.info(f"Extracted {len(weather_data)} weather records")
 
         try:
             status = 'FAILED' if weather_data.empty else 'SUCCESS'
@@ -449,318 +408,50 @@ class OpenMeteoClient:
         except Exception as e:
             self.logger.warning(f"Error logging process: {str(e)}")
 
-        return weather_data, climate_data
-    def save_to_staging(self, weather_data: pd.DataFrame, climate_data: pd.DataFrame = None) -> bool:
-        """
-        Zapisanie danych pogodowych do tabel staging
-        
-        Args:
-            weather_data: DataFrame z danymi pogodowymi
-            climate_data: DataFrame ze wskaźnikami klimatycznymi (opcjonalnie)
-            
-        Returns:
-            True jeśli sukces, False w przeciwnym razie
-        """
+        return weather_data
+
+    # Columns of staging_weather_data written by this script (table defined in database/create_warehouse.sql)
+    STAGING_COLUMNS = ['timestamp', 'country_code', 'zone_name', 'subzone_code', 'subzone_name',
+                       'temperature_avg', 'humidity', 'precipitation', 'wind_speed', 'wind_direction',
+                       'air_pressure', 'cloud_cover', 'solar_radiation', 'weather_code', 'weather_condition',
+                       'latitude', 'longitude']
+
+    def save_to_staging(self, weather_data: pd.DataFrame) -> bool:
+        """Replace the contents of staging_weather_data with weather_data (bulk insert)."""
+        if weather_data.empty:
+            self.logger.warning("No weather data to save")
+            return False
+
+        # One backup file, overwritten on every run
         try:
-            # Sprawdzamy czy connection_string ma odpowiedni format
-            if 'Driver' not in self.connection_string and 'DSN' not in self.connection_string:
-                self.logger.warning("Connection string may be invalid, trying to fix it")
-                # Próba naprawy connection string
-                self.connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;"
-                self.logger.info(f"Using connection string: {self.connection_string}")
-            
+            weather_data.to_csv('staging_weather_data.csv', index=False)
+        except Exception as e:
+            self.logger.warning(f"Could not write CSV backup: {str(e)}")
+
+        try:
             conn = pyodbc.connect(self.connection_string)
-            self.logger.info("Connected to database successfully")
-            
-            # Najpierw zapisujemy dane do CSV jako bezpieczną kopię, niezależnie od wyniku
-            try:
-                if not weather_data.empty:
-                    csv_filename = f'staging_weather_data_eu_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-                    weather_data.to_csv(csv_filename, index=False)
-                    self.logger.info(f"Weather data saved to {csv_filename} as backup")
-                
-                if climate_data is not None and not climate_data.empty:
-                    csv_filename = f'staging_climate_data_eu_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-                    climate_data.to_csv(csv_filename, index=False)
-                    self.logger.info(f"Climate data saved to {csv_filename} as backup")
-            except Exception as csv_e:
-                self.logger.error(f"Error saving to CSV backup: {str(csv_e)}")
-            
-            # Zapis danych pogodowych
-            if not weather_data.empty:
-                self.logger.info("Creating or updating weather staging table")
-                self._create_weather_staging_table(conn)
-                
-                cursor = conn.cursor()
-                try:
-                    cursor.execute("IF OBJECT_ID('staging_weather_data', 'U') IS NOT NULL TRUNCATE TABLE staging_weather_data")
-                    self.logger.info("Truncated staging_weather_data table")
-                except Exception as e:
-                    self.logger.warning(f"Could not truncate table: {str(e)}")
-                    
-                self._bulk_insert_weather_data(conn, weather_data)
-                self.logger.info(f"Saved {len(weather_data)} weather records to staging")
-            
-            # Zapis wskaźników klimatycznych
-            if climate_data is not None and not climate_data.empty:
-                self.logger.info("Creating or updating climate staging table")
-                self._create_climate_staging_table(conn)
-                
-                cursor = conn.cursor()
-                try:
-                    cursor.execute("IF OBJECT_ID('staging_climate_data', 'U') IS NOT NULL TRUNCATE TABLE staging_climate_data")
-                    self.logger.info("Truncated staging_climate_data table")
-                except Exception as e:
-                    self.logger.warning(f"Could not truncate table: {str(e)}")
-                
-                self._bulk_insert_climate_data(conn, climate_data)
-                self.logger.info(f"Saved {len(climate_data)} climate records to staging")
-            
+            cursor = conn.cursor()
+            if cursor.execute("SELECT OBJECT_ID('dbo.staging_weather_data', 'U')").fetchone()[0] is None:
+                raise RuntimeError("staging_weather_data does not exist - run database/create_warehouse.sql first")
+
+            df = weather_data[self.STAGING_COLUMNS].astype(object)
+            df = df.where(pd.notna(df), None)  # NaN -> NULL
+            rows = [tuple(r) for r in df.itertuples(index=False, name=None)]
+
+            cursor.execute("TRUNCATE TABLE dbo.staging_weather_data")
+            cursor.fast_executemany = True
+            cursor.executemany(
+                f"INSERT INTO dbo.staging_weather_data ({', '.join(self.STAGING_COLUMNS)}) "
+                f"VALUES ({', '.join('?' for _ in self.STAGING_COLUMNS)})", rows)
             conn.commit()
             conn.close()
+            self.logger.info(f"Saved {len(rows)} weather records to staging_weather_data")
             return True
-            
         except Exception as e:
             self.logger.error(f"Error saving data to staging: {str(e)}")
-            
-            # Dane już zapisane do CSV jako bezpieczna kopia
             return False
-    
-    def _create_weather_staging_table(self, conn):
-        """Utworzenie tabeli staging dla danych pogodowych"""
-        cursor = conn.cursor()
-        
-        # Sprawdź czy tabela istnieje
-        cursor.execute("IF OBJECT_ID('staging_weather_data', 'U') IS NOT NULL SELECT 1 ELSE SELECT 0")
-        table_exists = cursor.fetchone()[0]
-        
-        if not table_exists:
-            # Jeśli tabela nie istnieje, stwórz ją
-            create_sql = """
-            CREATE TABLE staging_weather_data (
-                id BIGINT IDENTITY(1,1) PRIMARY KEY,
-                timestamp DATETIME2 NOT NULL,
-                country_code NVARCHAR(5) NOT NULL,
-                zone_name NVARCHAR(100) NOT NULL,
-                subzone_code NVARCHAR(10) NOT NULL,
-                subzone_name NVARCHAR(100) NOT NULL,
-                temperature_avg DECIMAL(5,2),
-                temperature_min DECIMAL(5,2),
-                temperature_max DECIMAL(5,2),
-                humidity DECIMAL(5,2),
-                precipitation DECIMAL(5,2),
-                wind_speed DECIMAL(5,2),
-                wind_direction INT,
-                air_pressure DECIMAL(7,2),
-                cloud_cover DECIMAL(5,2),
-                solar_radiation DECIMAL(7,2),
-                weather_code INT,
-                weather_condition NVARCHAR(30),
-                latitude DECIMAL(10,6),
-                longitude DECIMAL(10,6),
-                created_at DATETIME2 DEFAULT GETDATE()
-            )
-            """
-            
-            cursor.execute(create_sql)
-            self.logger.info("Created new staging_weather_data table")
-        else:
-            # Tabela istnieje, sprawdź czy ma wymagane kolumny i dodaj jeśli nie
-            # Dla każdej potencjalnie brakującej kolumny dodaj ALTER TABLE
-            alter_statements = [
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_code' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD subzone_code NVARCHAR(10) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_name' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD subzone_name NVARCHAR(100) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'latitude' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD latitude DECIMAL(10,6) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'longitude' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD longitude DECIMAL(10,6) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'weather_code' AND Object_ID = Object_ID('staging_weather_data')) ALTER TABLE staging_weather_data ADD weather_code INT NULL"
-            ]
-            
-            for statement in alter_statements:
-                try:
-                    cursor.execute(statement)
-                    self.logger.info(f"Altered table with: {statement}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to execute: {statement}, Error: {str(e)}")
-        
-        conn.commit()
-    
-    def _create_climate_staging_table(self, conn):
-        """Utworzenie tabeli staging dla wskaźników klimatycznych"""
-        cursor = conn.cursor()
-        
-        # Sprawdź czy tabela istnieje
-        cursor.execute("IF OBJECT_ID('staging_climate_data', 'U') IS NOT NULL SELECT 1 ELSE SELECT 0")
-        table_exists = cursor.fetchone()[0]
-        
-        if not table_exists:
-            # Jeśli tabela nie istnieje, stwórz ją
-            create_sql = """
-            CREATE TABLE staging_climate_data (
-                id BIGINT IDENTITY(1,1) PRIMARY KEY,
-                date DATE NOT NULL,
-                country_code NVARCHAR(5) NOT NULL,
-                zone_name NVARCHAR(100) NOT NULL,
-                subzone_code NVARCHAR(10) NOT NULL,
-                subzone_name NVARCHAR(100) NOT NULL,
-                heating_degree_days DECIMAL(5,2),
-                cooling_degree_days DECIMAL(5,2),
-                temperature_max DECIMAL(5,2),
-                temperature_min DECIMAL(5,2),
-                temperature_mean DECIMAL(5,2),
-                latitude DECIMAL(10,6),
-                longitude DECIMAL(10,6),
-                created_at DATETIME2 DEFAULT GETDATE()
-            )
-            """
-            
-            cursor.execute(create_sql)
-            self.logger.info("Created new staging_climate_data table")
-        else:
-            # Tabela istnieje, sprawdź czy ma wymagane kolumny i dodaj jeśli nie
-            alter_statements = [
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_code' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD subzone_code NVARCHAR(10) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'subzone_name' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD subzone_name NVARCHAR(100) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'temperature_max' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD temperature_max DECIMAL(5,2) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'temperature_min' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD temperature_min DECIMAL(5,2) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'temperature_mean' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD temperature_mean DECIMAL(5,2) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'latitude' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD latitude DECIMAL(10,6) NULL",
-                "IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = 'longitude' AND Object_ID = Object_ID('staging_climate_data')) ALTER TABLE staging_climate_data ADD longitude DECIMAL(10,6) NULL"
-            ]
-            
-            for statement in alter_statements:
-                try:
-                    cursor.execute(statement)
-                    self.logger.info(f"Altered table with: {statement}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to execute: {statement}, Error: {str(e)}")
-        
-        conn.commit()
-    
-    def _bulk_insert_weather_data(self, conn, df: pd.DataFrame):
-        """Bulk insert danych pogodowych"""
-        cursor = conn.cursor()
-        
-        # Sprawdź jakie kolumny istnieją w tabeli
-        try:
-            cursor.execute("SELECT TOP 0 * FROM staging_weather_data")
-            table_columns = [column[0] for column in cursor.description]
-            self.logger.info(f"Found existing columns in staging_weather_data: {table_columns}")
-        except Exception as e:
-            self.logger.error(f"Error reading table structure: {str(e)}")
-            # W przypadku błędu, załóżmy standardowy zestaw kolumn
-            table_columns = [
-                'timestamp', 'country_code', 'zone_name', 'temperature_avg',
-                'temperature_min', 'temperature_max', 'humidity', 'precipitation',
-                'wind_speed', 'wind_direction', 'air_pressure', 'cloud_cover',
-                'solar_radiation', 'weather_condition'
-            ]
-        
-        # Wybierz tylko te kolumny z DataFrame, które istnieją w tabeli
-        df_columns = df.columns.tolist()
-        existing_columns = [col for col in df_columns if col in table_columns]
-        
-        # Jeśli brakuje nowych kolumn (subzone_code, subzone_name itd.) uzupełnij NULL-ami
-        if len(existing_columns) < len(table_columns):
-            for column in table_columns:
-                if column not in existing_columns and column not in ['id', 'created_at']:
-                    # Wypełniamy wartości dla brakujących kolumn
-                    if column == 'subzone_code':
-                        df['subzone_code'] = 'UNKNOWN'
-                    elif column == 'subzone_name':
-                        df['subzone_name'] = 'Unknown'
-                    elif column == 'latitude' or column == 'longitude':
-                        df[column] = 0.0
-                    
-                    # Dodaj nową kolumnę do listy istniejących
-                    existing_columns.append(column)
-                    
-        self.logger.info(f"Using columns for insert: {existing_columns}")
-        
-        # Omijamy kolumny id i created_at, które są generowane przez bazę danych
-        insert_columns = [col for col in existing_columns if col not in ['id', 'created_at']]
-        
-        for _, row in df.iterrows():
-            values = []
-            for col in insert_columns:
-                value = row.get(col, None)
-                if pd.isna(value):
-                    values.append(None)
-                else:
-                    values.append(value)
-            
-            placeholders = ', '.join(['?' for _ in values])
-            insert_sql = f"""
-                INSERT INTO staging_weather_data 
-                ({', '.join(insert_columns)}) 
-                VALUES ({placeholders})
-            """
-            
-            cursor.execute(insert_sql, values)
-        
-        # Commit po wszystkich wierszach
-        conn.commit()
-    
-    def _bulk_insert_climate_data(self, conn, df: pd.DataFrame):
-        """Bulk insert wskaźników klimatycznych"""
-        cursor = conn.cursor()
-        
-        # Sprawdź jakie kolumny istnieją w tabeli
-        try:
-            cursor.execute("SELECT TOP 0 * FROM staging_climate_data")
-            table_columns = [column[0] for column in cursor.description]
-            self.logger.info(f"Found existing columns in staging_climate_data: {table_columns}")
-        except Exception as e:
-            self.logger.error(f"Error reading climate table structure: {str(e)}")
-            # W przypadku błędu, załóżmy standardowy zestaw kolumn
-            table_columns = [
-                'date', 'country_code', 'zone_name', 'heating_degree_days', 'cooling_degree_days'
-            ]
-        
-        # Wybierz tylko te kolumny z DataFrame, które istnieją w tabeli
-        df_columns = df.columns.tolist()
-        existing_columns = [col for col in df_columns if col in table_columns]
-        
-        # Jeśli brakuje nowych kolumn uzupełnij NULL-ami
-        if len(existing_columns) < len(table_columns):
-            for column in table_columns:
-                if column not in existing_columns and column not in ['id', 'created_at']:
-                    # Wypełniamy wartości dla brakujących kolumn
-                    if column == 'subzone_code':
-                        df['subzone_code'] = 'UNKNOWN'
-                    elif column == 'subzone_name':
-                        df['subzone_name'] = 'Unknown'
-                    elif column in ['temperature_max', 'temperature_min', 'temperature_mean', 'latitude', 'longitude']:
-                        df[column] = 0.0
-                    
-                    # Dodaj nową kolumnę do listy istniejących
-                    existing_columns.append(column)
-        
-        self.logger.info(f"Using columns for climate insert: {existing_columns}")
-        
-        # Omijamy kolumny id i created_at, które są generowane przez bazę danych
-        insert_columns = [col for col in existing_columns if col not in ['id', 'created_at']]
-        
-        for _, row in df.iterrows():
-            values = []
-            for col in insert_columns:
-                value = row.get(col, None)
-                if pd.isna(value):
-                    values.append(None)
-                else:
-                    values.append(value)
-            
-            placeholders = ', '.join(['?' for _ in values])
-            insert_sql = f"""
-                INSERT INTO staging_climate_data 
-                ({', '.join(insert_columns)}) 
-                VALUES ({placeholders})
-            """
-            
-            cursor.execute(insert_sql, values)
-        
-        # Commit po wszystkich wierszach
-        conn.commit()
-    
+
+
     def _log_process(self, process_name: str, status: str, records: int = 0, error_msg: str = None):
         """Logowanie procesu do bazy danych"""
         try:
@@ -870,9 +561,8 @@ def main():
             cities = [subzone['name'] for subzone in zone_info['subzones']]
             print(f"  {zone_info['name']} ({country_code}): {', '.join(cities)}")
         
-        # Weather (hourly) and climate (daily) data come from the same requests
         print("\nStarting weather data extraction...")
-        weather_data, climate_data = client.extract_all(start_date, end_date)
+        weather_data = client.extract_all(start_date, end_date)
 
         if weather_data.empty:
             print("Warning: No weather data extracted")
@@ -886,26 +576,13 @@ def main():
                 country_name = client.weather_locations[row['country_code']]['name']
                 print(f"  {country_name} ({row['country_code']}): {row['records']} records")
         
-        if climate_data.empty:
-            print("Warning: No climate data extracted")
-        else:
-            print(f"Successfully extracted {len(climate_data)} climate records for all EU subzones")
-            
-            # Podsumowanie danych klimatycznych per kraj
-            climate_summary = climate_data.groupby('country_code').size().reset_index(name='records')
-            print("\nClimate data summary by country:")
-            for _, row in climate_summary.iterrows():
-                country_name = client.weather_locations[row['country_code']]['name']
-                print(f"  {country_name} ({row['country_code']}): {row['records']} records")
-        
         # Zapis do staging
         print("\nSaving data to staging tables...")
-        success = client.save_to_staging(weather_data, climate_data)
-        
+        success = client.save_to_staging(weather_data)
+
         if success:
-            print("EU weather and climate data extraction completed successfully")
-            print(f"Total weather records: {len(weather_data) if not weather_data.empty else 0}")
-            print(f"Total climate records: {len(climate_data) if not climate_data.empty else 0}")
+            print("EU weather data extraction completed successfully")
+            print(f"Total weather records: {len(weather_data)}")
             sys.exit(0)
         else:
             print("Error occurred during EU weather data extraction")
