@@ -1,7 +1,11 @@
 """
-ENTSOEClient.py
-Klient API do komunikacji z ENTSO-E Transparency Platform
-Pobiera dane o zużyciu energii i generacji wg typów źródeł
+ENTSO-E extract: actual load, day-ahead load forecast and generation per production type for all
+bidding zones (zones.py) -> staging_entso_actual_load, staging_entso_forecast, staging_entso_generation.
+
+    python entsoe_client.py --start <date> --end <date> [--connection <odbc>]   (SSIS task "Extract ENTSO-E Data")
+
+The token comes from the ENTSO_TOKEN environment variable. The end date is exclusive; times are UTC;
+sub-hourly values are averaged to hourly values.
 """
 
 import re
@@ -61,29 +65,26 @@ class SourceError(RuntimeError):
 
 
 class ENTSOEClient:
-    """Klient API dla ENTSO-E Transparency Platform"""
+    """Client for the ENTSO-E Transparency Platform REST API."""
     
     def __init__(self, security_token: str, connection_string: str):
         """
-        Inicjalizacja klienta ENTSO-E
-        
         Args:
-            security_token: Token API dla ENTSO-E
-            connection_string: String połączenia z bazą danych
+            security_token: ENTSO-E API token
+            connection_string: ODBC connection string of the warehouse
         """
         self.security_token = security_token
         self.base_url = "https://web-api.tp.entsoe.eu/api"
         self.connection_string = connection_string
         
-        # Konfiguracja logowania
-        logging.basicConfig(level=logging.INFO, 
+        logging.basicConfig(level=logging.INFO,
                            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
         
-        # Logowanie parametrów (bez wrażliwych danych)
+        # never log the token
         self.logger.info(f"Initializing ENTSOEClient with connection to {self.base_url}")
         
-        # Mapowanie stref przetargowych
+        # bidding zone EIC code -> name, country, timezone
         self.bidding_zones = zones.bidding_zones()
         
         self.rate_limiter = RateLimiter(MAX_REQUESTS_PER_MINUTE)
@@ -151,13 +152,8 @@ class ENTSOEClient:
 
     def _parse_xml_response(self, xml_content: str) -> List[Dict]:
         """
-        Parsowanie odpowiedzi XML do listy słowników
-        
-        Args:
-            xml_content: Zawartość XML
-            
-        Returns:
-            Lista słowników z danymi
+        Parse an ENTSO-E XML document into hourly records
+        ({timestamp, quantity, bidding_zone[, generation_type]}). Raises RuntimeError on invalid XML.
         """
         if not xml_content:
             self.logger.error("Empty XML content provided to _parse_xml_response")
@@ -167,33 +163,30 @@ class ENTSOEClient:
             self.logger.debug(f"Parsing XML response of length {len(xml_content)}")
             root = ET.fromstring(xml_content)
             
-            # Wykryj przestrzeń nazw
+            # detect the XML namespace
             namespace = ''
             if '}' in root.tag:
                 namespace = root.tag.split('}')[0] + '}'
                 self.logger.debug(f"Detected namespace: {namespace}")
                 
-                # Utwórz mapowanie przestrzeni nazw dla findall
-                namespaces = {'ns': namespace[1:-1]}  # Usuń znaki { i }
+                # namespace mapping for findall (without the braces)
+                namespaces = {'ns': namespace[1:-1]}
                 self.logger.debug(f"Using namespace mapping: {namespaces}")
             else:
                 self.logger.debug("No namespace detected in XML")
             
             data = []
             
-            # Szukaj elementów TimeSeries z uwzględnieniem przestrzeni nazw
+            # find the TimeSeries elements
             if namespace:
-                # Używamy xpath z przestrzenią nazw
                 timeseries_elements = root.findall(".//ns:TimeSeries", namespaces)
                 self.logger.debug(f"Found {len(timeseries_elements)} TimeSeries elements using namespace")
             else:
-                # Próba bez przestrzeni nazw
                 timeseries_elements = root.findall(".//TimeSeries")
                 self.logger.debug(f"Found {len(timeseries_elements)} TimeSeries elements without namespace")
             
-            # Jeśli nadal nie znaleziono, spróbuj inaczej
+            # last resort: any element whose tag ends with TimeSeries
             if not timeseries_elements:
-                # Ostatnia próba - przeszukaj wszystkie potomne elementy
                 all_elements = list(root.iter())
                 timeseries_elements = [elem for elem in all_elements if elem.tag.endswith('TimeSeries')]
                 self.logger.debug(f"Found {len(timeseries_elements)} TimeSeries elements using iter method")
@@ -202,9 +195,8 @@ class ENTSOEClient:
                 self.logger.warning("No TimeSeries elements found in XML response")
                 return []
             
-            # Przetwarzanie każdego elementu TimeSeries
             for ts_idx, timeseries in enumerate(timeseries_elements):
-                # Pobierz informacje o strefie przetargowej
+                # bidding zone of the series
                 if namespace:
                     bidding_zone_elem = timeseries.find(".//ns:outBiddingZone_Domain.mRID", namespaces)
                     if bidding_zone_elem is None:
@@ -217,7 +209,7 @@ class ENTSOEClient:
                 bidding_zone = bidding_zone_elem.text if bidding_zone_elem is not None else None
                 self.logger.debug(f"TimeSeries {ts_idx} - Bidding zone: {bidding_zone}")
                 
-                # Pobierz informacje o typie generacji (jeśli dostępne)
+                # production type (generation documents only)
                 generation_type = None
                 if namespace:
                     psr_type_elem = timeseries.find(".//ns:MktPSRType/ns:psrType", namespaces)
@@ -239,7 +231,7 @@ class ENTSOEClient:
                     if in_zone is not None:
                         bidding_zone = in_zone.text
 
-                # Pobierz okres czasu
+                # time periods of the series
                 if namespace:
                     period_elements = timeseries.findall(".//ns:Period", namespaces)
                 else:
@@ -247,9 +239,8 @@ class ENTSOEClient:
                 
                 self.logger.debug(f"TimeSeries {ts_idx} has {len(period_elements)} Period elements")
                 
-                # Przetwarzanie każdego okresu
                 for period_idx, period in enumerate(period_elements):
-                    # Pobierz interwał czasu
+                    # start of the period
                     if namespace:
                         start_time_elem = period.find(".//ns:start", namespaces)
                     else:
@@ -460,11 +451,9 @@ class ENTSOEClient:
         cursor.executemany(f"INSERT INTO dbo.{table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
                            rows)
 
-# Funkcja główna do uruchomienia z SSIS
 def main():
-    """Główna funkcja wywoływana przez SSIS"""
+    """Entry point for SSIS and manual runs: python entsoe_client.py --start <date> --end <date>."""
     start_run_log('entsoe_client')
-    # Konfiguracja logowania
     import sys
     import os
     import argparse
@@ -476,13 +465,12 @@ def main():
     
     logger.info("Starting ENTSOEClient process")
     
-    # Ręczne parsowanie argumentów (bez argparse)
+    # command-line arguments: --token, --connection, --start, --end (as "--x value" or "--x=value")
     token = None
     connection_string = None
     start_date_str = None
     end_date_str = None
     
-    # Parsowanie argumentów ręcznie
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -512,7 +500,7 @@ def main():
                 i += 1
         i += 1
     
-    # Jeśli nie podano argumentów, spróbuj użyć zmiennych środowiskowych
+    # fall back to the environment variables
     if not token:
         token = os.getenv('ENTSO_TOKEN', '')
     
@@ -524,7 +512,7 @@ def main():
         connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;"
         logger.info("Using default local connection string")
 
-    # Sprawdzenie czy wymagane argumenty są dostępne
+    # both are required
     if not token:
         logger.error("ENTSO-E API token is missing. Provide --token argument or set ENTSO_TOKEN environment variable")
         sys.exit(1)
@@ -536,18 +524,17 @@ def main():
     logger.info(f"Security token found: {'Yes' if token else 'No'}")
     logger.info(f"Connection string found: {'Yes' if connection_string else 'No'}")
     
-    # Domyślnie pobieramy dane z ostatnich 24 godzin
+    # default period: the last 24 hours
     end_date = datetime.now().replace(minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(hours=24)
     
-    # Przetwarzanie dat z argumentów
+    # dates from the arguments: YYYY-MM-DD or ISO date and time
     if start_date_str:
         try:
             logger.info(f"Parsing start date: {start_date_str}")
-            # Obsługa różnych formatów daty
-            if 'T' in start_date_str:  # Format ISO z czasem
+            if 'T' in start_date_str:  # ISO date and time
                 start_date = datetime.fromisoformat(start_date_str)
-            else:  # Tylko data
+            else:  # date only
                 start_date = datetime.fromisoformat(start_date_str + 'T00:00:00')
             logger.info(f"Using custom start date: {start_date}")
         except ValueError as e:
@@ -557,10 +544,9 @@ def main():
     if end_date_str:
         try:
             logger.info(f"Parsing end date: {end_date_str}")
-            # Obsługa różnych formatów daty
-            if 'T' in end_date_str:  # Format ISO z czasem
+            if 'T' in end_date_str:  # ISO date and time
                 end_date = datetime.fromisoformat(end_date_str)
-            else:  # Tylko data
+            else:  # date only
                 end_date = datetime.fromisoformat(end_date_str + 'T00:00:00')
             logger.info(f"Using custom end date: {end_date}")
         except ValueError as e:

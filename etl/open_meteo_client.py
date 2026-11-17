@@ -1,8 +1,11 @@
 """
-OpenMeteoClient.py
-Klient API do komunikacji z Open-Meteo
-Pobiera historyczne dane pogodowe i wskaźniki klimatyczne
-Rozszerzony o wszystkie kraje Unii Europejskiej
+Open-Meteo extract: hourly historical weather (archive API, UTC) for representative cities of all
+27 EU countries -> staging_weather_data.
+
+    python open_meteo_client.py <start_date> <end_date>      (SSIS task "Extract Weather Data")
+
+The end date is exclusive. Requests are made per city and calendar year and paced to the free-tier
+limits (see LIMITS). The country average per hour is computed in T-SQL (vw_weather_country_hour).
 """
 
 import requests
@@ -84,24 +87,21 @@ WMO_CONDITIONS = {
 
 
 class OpenMeteoClient:
-    """Klient API dla Open-Meteo Weather Service"""
+    """Client for the Open-Meteo historical weather (archive) API."""
     
     def __init__(self, connection_string: str):
         """
-        Inicjalizacja klienta Open-Meteo
-        
         Args:
-            connection_string: String połączenia z bazą danych
+            connection_string: ODBC connection string of the warehouse
         """
         # Archive API = real historical weather. (The climate API is model simulation; not used.)
         self.base_url = "https://archive-api.open-meteo.com/v1/archive"
         self.connection_string = connection_string
         
-        # Konfiguracja logowania
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
         
-        # Rozszerzona mapa lokalizacji - wszystkie kraje UE z reprezentatywnymi miastami
+        # representative cities per EU country; the country value is their average (decision A)
         self.weather_locations = {
             'AT': {  # Austria
                 'name': 'Austria',
@@ -485,30 +485,28 @@ class OpenMeteoClient:
         return result
 
 
-# Funkcja główna do uruchomienia z SSIS
 def main():
-    """Główna funkcja wywoływana przez SSIS"""
+    """Entry point for SSIS and manual runs: python open_meteo_client.py <start_date> <end_date>."""
     start_run_log('open_meteo_client')
     import sys
     import os
     from datetime import datetime, timedelta
     
-    # Parametry z SSIS lub zmiennych środowiskowych
+    # connection string from the environment (SSIS passes none)
     connection_string = os.getenv('DW_CONNECTION_STRING', '') or os.getenv('ConnectionString', '')
    
     print("Connection string successfully read")
    
-    # Sprawdzenie czy connection_string ma odpowiedni format
+    # fall back to the local default when missing or not an ODBC string
     if not connection_string or ('Driver' not in connection_string and 'DSN' not in connection_string):
-        # Domyślny connection string jako bezpieczna opcja
         connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;"
         print(f"Using default connection string: {connection_string}")
     
-    # Domyślnie pobieramy dane z ostatnich 36 godzin
+    # default period: the last 36 hours
     end_date = datetime.now().replace(minute=0, second=0, microsecond=0)
     start_date = end_date - timedelta(hours=36)
     
-    # Parametry z argumentów linii komend (opcjonalnie)
+    # dates from the arguments (optional)
     if len(sys.argv) > 1:
         try:
             start_date_str = sys.argv[1]
