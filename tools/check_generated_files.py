@@ -32,10 +32,10 @@ RULES = [
     ("etl/eurostat_export/eurostat_raw_electricity_prices.csv", "expected", "eurostat_client.py: raw data per indicator"),
     ("etl/eurostat_export/eurostat_raw_energy_intensity.csv", "expected", "eurostat_client.py: raw data per indicator"),
     ("etl/eurostat_export/eurostat_raw_unemployment_rate.csv", "expected", "eurostat_client.py: raw data per indicator"),
-    ("etl/eurostat_export/eurostat_integrated.csv", "expected", "eurostat_client.py: integrated table (backlog 3.1)"),
-    ("etl/eurostat_extraction_summary.json", "expected", "eurostat_client.py: extraction summary"),
 
     ("etl/eurostat_export/eurostat_raw_*.csv", "obsolete", "Eurostat indicator dropped in step 2.1"),
+    ("etl/eurostat_export/eurostat_integrated.csv", "obsolete", "integrated table of the old eurostat_client.py (removed in 3.1)"),
+    ("etl/eurostat_extraction_summary.json", "obsolete", "summary of the old eurostat_client.py (removed in 3.1)"),
     ("etl/staging_*_eu_*.csv", "obsolete", "timestamped CSV backups of the old weather/climate script"),
     ("etl/staging_climate_data*.csv", "obsolete", "climate API data (no longer used)"),
     ("etl/staging_entso_*.csv", "obsolete", "CSV backups of the old entsoe_client.py (removed in 2.4)"),
