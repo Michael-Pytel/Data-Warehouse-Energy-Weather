@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "Data-Warehouse-Energy-Weather-Report"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "996943d6-2a5a-453c-ad6b-cc8fff2cbd76"
+  }
+}

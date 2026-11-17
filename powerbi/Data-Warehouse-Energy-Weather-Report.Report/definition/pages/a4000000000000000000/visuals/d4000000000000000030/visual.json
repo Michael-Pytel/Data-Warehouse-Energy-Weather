@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "d4000000000000000030",
+  "position": {
+    "x": 24,
+    "y": 990,
+    "z": 13,
+    "height": 70,
+    "width": 1872,
+    "tabOrder": 13
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "Sources: Open-Meteo (weather, average of each country's cities), Eurostat (population, GDP per person, household electricity price excl. taxes, unemployment). Degree days: base 18 °C. Demand per person only uses country-years with at least 95 % of hours covered (Cyprus: none; Ireland: 2024 only). Ireland's demand covers the all-island market (incl. Northern Ireland), so its per-person figure is overstated. Bulgaria and Malta are excluded.",
+                    "textStyle": {
+                      "fontSize": "13pt",
+                      "color": "#605e5c"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

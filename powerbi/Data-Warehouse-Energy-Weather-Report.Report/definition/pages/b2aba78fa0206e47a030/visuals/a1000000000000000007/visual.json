@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "a1000000000000000007",
+  "position": {
+    "x": 24,
+    "y": 990,
+    "z": 15000,
+    "height": 70,
+    "width": 1872,
+    "tabOrder": 15000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "Sources: ENTSO-E Transparency Platform (load, generation), Open-Meteo (weather), Eurostat (socio-economic figures). Period 2023-01-01 – 2025-12-31, hours in UTC. Bulgaria and Malta are excluded (no ENTSO-E data); Cyprus mostly from mid-2025.",
+                    "textStyle": {
+                      "fontSize": "13pt",
+                      "color": "#605e5c"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}
