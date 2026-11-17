@@ -8,7 +8,9 @@
 --   EXEC dbo.usp_load_facts;        -- task "Load Facts"
 --
 -- Rules (docs/PLAN.md):
---   - insert-only facts: rows that already exist are never changed; re-running a period changes nothing
+--   - facts: new rows are inserted; existing rows are updated only when a reloaded value differs
+--     (ENTSO-E revisions, late data), never to NULL or to the Unknown key; updated_at records the change.
+--     Re-running a period with unchanged data changes nothing.
 --   - SCD Type 2 for dim_bidding_zone and dim_socioeconomic_profile (decision E)
 --   - unknown values stay NULL; keys without a match get 0 = "Unknown" and are counted in etl_log (decision G)
 --   - weather per country and hour = average of the country's cities (decision A)
@@ -333,11 +335,14 @@ LEFT JOIN cond c ON c.timestamp = a.timestamp AND c.country_code = a.country_cod
 GO
 
 -- -------------------------------------------------------------------------------------
--- fact_load: one row per zone and hour that has a load or forecast value (insert-only)
+-- fact_load: one row per zone and hour that has a load or forecast value.
+-- Existing rows are updated when a reloaded value differs (ENTSO-E revisions, late data); a stored
+-- value is never replaced by NULL and a known key never by 0 (Unknown). New rows are inserted.
 -- -------------------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_load_fact_load
     @rows_inserted INT = 0 OUTPUT,
-    @details NVARCHAR(1000) = NULL OUTPUT
+    @details NVARCHAR(1000) = NULL OUTPUT,
+    @rows_updated INT = 0 OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -374,6 +379,44 @@ BEGIN
     LEFT JOIN dbo.ref_public_holiday h       ON h.country_code = z.country_code AND h.holiday_date = CAST(e.timestamp AS DATE);
 
     BEGIN TRANSACTION;
+    UPDATE f
+    SET socioeconomic_profile_key = n.socioeconomic_profile_key, weather_condition_key = n.weather_condition_key,
+        is_public_holiday = n.is_public_holiday, actual_load_mwh = n.actual_load_mwh,
+        forecast_load_mwh = n.forecast_load_mwh, temperature_c = n.temperature_c, humidity_pct = n.humidity_pct,
+        precipitation_mm = n.precipitation_mm, wind_speed_kmh = n.wind_speed_kmh,
+        wind_direction_deg = n.wind_direction_deg, cloud_cover_pct = n.cloud_cover_pct,
+        solar_radiation_wm2 = n.solar_radiation_wm2, air_pressure_hpa = n.air_pressure_hpa,
+        heating_degree_hours = n.heating_degree_hours, cooling_degree_hours = n.cooling_degree_hours,
+        updated_at = SYSUTCDATETIME()
+    FROM dbo.fact_load f
+    JOIN #src s ON s.date_key = f.date_key AND s.time_key = f.time_key AND s.bidding_zone_key = f.bidding_zone_key
+    CROSS APPLY (SELECT
+        CASE WHEN s.socioeconomic_profile_key <> 0 THEN s.socioeconomic_profile_key ELSE f.socioeconomic_profile_key END AS socioeconomic_profile_key,
+        CAST(CASE WHEN s.weather_condition_key <> 0 THEN s.weather_condition_key ELSE f.weather_condition_key END AS TINYINT) AS weather_condition_key,
+        CAST(s.is_public_holiday AS NVARCHAR(3))                                      AS is_public_holiday,
+        ISNULL(CAST(s.actual              AS DECIMAL(12,2)), f.actual_load_mwh)       AS actual_load_mwh,
+        ISNULL(CAST(s.forecast            AS DECIMAL(12,2)), f.forecast_load_mwh)     AS forecast_load_mwh,
+        ISNULL(CAST(s.temperature_c       AS DECIMAL(5,2)),  f.temperature_c)         AS temperature_c,
+        ISNULL(CAST(s.humidity_pct        AS DECIMAL(5,2)),  f.humidity_pct)          AS humidity_pct,
+        ISNULL(CAST(s.precipitation_mm    AS DECIMAL(6,2)),  f.precipitation_mm)      AS precipitation_mm,
+        ISNULL(CAST(s.wind_speed_kmh      AS DECIMAL(5,2)),  f.wind_speed_kmh)        AS wind_speed_kmh,
+        ISNULL(CAST(s.wind_direction_deg  AS SMALLINT),      f.wind_direction_deg)    AS wind_direction_deg,
+        ISNULL(CAST(s.cloud_cover_pct     AS DECIMAL(5,2)),  f.cloud_cover_pct)       AS cloud_cover_pct,
+        ISNULL(CAST(s.solar_radiation_wm2 AS DECIMAL(7,2)),  f.solar_radiation_wm2)   AS solar_radiation_wm2,
+        ISNULL(CAST(s.air_pressure_hpa    AS DECIMAL(7,2)),  f.air_pressure_hpa)      AS air_pressure_hpa,
+        ISNULL(CAST(s.heating_degree_hours AS DECIMAL(6,3)), f.heating_degree_hours)  AS heating_degree_hours,
+        ISNULL(CAST(s.cooling_degree_hours AS DECIMAL(6,3)), f.cooling_degree_hours)  AS cooling_degree_hours) n
+    WHERE EXISTS (SELECT n.socioeconomic_profile_key, n.weather_condition_key, n.is_public_holiday, n.actual_load_mwh,
+                         n.forecast_load_mwh, n.temperature_c, n.humidity_pct, n.precipitation_mm, n.wind_speed_kmh,
+                         n.wind_direction_deg, n.cloud_cover_pct, n.solar_radiation_wm2, n.air_pressure_hpa,
+                         n.heating_degree_hours, n.cooling_degree_hours
+                  EXCEPT
+                  SELECT f.socioeconomic_profile_key, f.weather_condition_key, f.is_public_holiday, f.actual_load_mwh,
+                         f.forecast_load_mwh, f.temperature_c, f.humidity_pct, f.precipitation_mm, f.wind_speed_kmh,
+                         f.wind_direction_deg, f.cloud_cover_pct, f.solar_radiation_wm2, f.air_pressure_hpa,
+                         f.heating_degree_hours, f.cooling_degree_hours);
+    SET @rows_updated = @@ROWCOUNT;
+
     INSERT INTO dbo.fact_load
         (date_key, time_key, bidding_zone_key, socioeconomic_profile_key, weather_condition_key, is_public_holiday,
          actual_load_mwh, forecast_load_mwh, temperature_c, humidity_pct, precipitation_mm, wind_speed_kmh,
@@ -390,7 +433,7 @@ BEGIN
     COMMIT TRANSACTION;
 
     -- unmatched keys and missing weather in the staged rows (decision G)
-    SELECT @details = CONCAT('fact_load: +', @rows_inserted, ' rows of ', COUNT(*), ' staged',
+    SELECT @details = CONCAT('fact_load: +', @rows_inserted, ' new, ', @rows_updated, ' updated, of ', COUNT(*), ' staged',
                              '; unknown zone: ', SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END),
                              '; unknown profile: ', SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END),
                              '; unknown weather condition: ', SUM(CASE WHEN weather_condition_key = 0 THEN 1 ELSE 0 END),
@@ -400,12 +443,14 @@ END;
 GO
 
 -- -------------------------------------------------------------------------------------
--- fact_generation: one row per zone, hour and production type (insert-only)
+-- fact_generation: one row per zone, hour and production type; existing rows are updated when a
+-- reloaded value differs (never to NULL / Unknown), new rows inserted.
 -- Unknown production types share key 0; their values are summed so the grain stays unique.
 -- -------------------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_load_fact_generation
     @rows_inserted INT = 0 OUTPUT,
-    @details NVARCHAR(1000) = NULL OUTPUT
+    @details NVARCHAR(1000) = NULL OUTPUT,
+    @rows_updated INT = 0 OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -429,6 +474,21 @@ BEGIN
              ISNULL(z.bidding_zone_key, 0), ISNULL(p.socioeconomic_profile_key, 0), ISNULL(t.generation_type_key, 0);
 
     BEGIN TRANSACTION;
+    UPDATE f
+    SET socioeconomic_profile_key = n.socioeconomic_profile_key, is_public_holiday = n.is_public_holiday,
+        generation_mwh = n.generation_mwh, updated_at = SYSUTCDATETIME()
+    FROM dbo.fact_generation f
+    JOIN #src s ON s.date_key = f.date_key AND s.time_key = f.time_key
+               AND s.bidding_zone_key = f.bidding_zone_key AND s.generation_type_key = f.generation_type_key
+    CROSS APPLY (SELECT
+        CASE WHEN s.socioeconomic_profile_key <> 0 THEN s.socioeconomic_profile_key ELSE f.socioeconomic_profile_key END AS socioeconomic_profile_key,
+        CAST(s.is_public_holiday AS NVARCHAR(3))                             AS is_public_holiday,
+        ISNULL(CAST(s.generation_mwh AS DECIMAL(12,2)), f.generation_mwh)    AS generation_mwh) n
+    WHERE EXISTS (SELECT n.socioeconomic_profile_key, n.is_public_holiday, n.generation_mwh
+                  EXCEPT
+                  SELECT f.socioeconomic_profile_key, f.is_public_holiday, f.generation_mwh);
+    SET @rows_updated = @@ROWCOUNT;
+
     INSERT INTO dbo.fact_generation
         (date_key, time_key, bidding_zone_key, socioeconomic_profile_key, generation_type_key, is_public_holiday, generation_mwh)
     SELECT s.date_key, s.time_key, s.bidding_zone_key, s.socioeconomic_profile_key, s.generation_type_key,
@@ -440,7 +500,7 @@ BEGIN
     SET @rows_inserted = @@ROWCOUNT;
     COMMIT TRANSACTION;
 
-    SELECT @details = CONCAT('fact_generation: +', @rows_inserted, ' rows of ', COUNT(*), ' staged',
+    SELECT @details = CONCAT('fact_generation: +', @rows_inserted, ' new, ', @rows_updated, ' updated, of ', COUNT(*), ' staged',
                              '; unknown zone: ', SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END),
                              '; unknown profile: ', SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END),
                              '; unknown production type: ', SUM(CASE WHEN generation_type_key = 0 THEN 1 ELSE 0 END))
@@ -462,15 +522,15 @@ CREATE OR ALTER PROCEDURE dbo.usp_load_facts
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @load INT, @gen INT, @load_details NVARCHAR(1000), @gen_details NVARCHAR(1000),
+    DECLARE @load INT, @gen INT, @load_upd INT, @gen_upd INT, @load_details NVARCHAR(1000), @gen_details NVARCHAR(1000),
             @details NVARCHAR(MAX), @total INT, @error NVARCHAR(MAX), @log_id BIGINT;
 
     EXEC dbo.usp_etl_step_start 'LOAD_FACTS', @log_id OUTPUT;
     BEGIN TRY
-        EXEC dbo.usp_load_fact_load       @rows_inserted = @load OUTPUT, @details = @load_details OUTPUT;
-        EXEC dbo.usp_load_fact_generation @rows_inserted = @gen  OUTPUT, @details = @gen_details  OUTPUT;
+        EXEC dbo.usp_load_fact_load       @rows_inserted = @load OUTPUT, @details = @load_details OUTPUT, @rows_updated = @load_upd OUTPUT;
+        EXEC dbo.usp_load_fact_generation @rows_inserted = @gen  OUTPUT, @details = @gen_details  OUTPUT, @rows_updated = @gen_upd OUTPUT;
 
-        SET @total = @load + @gen;
+        SET @total = @load + @gen + @load_upd + @gen_upd;   -- rows inserted + rows updated
         SET @details = CONCAT(@load_details, ' | ', @gen_details);
         EXEC dbo.usp_etl_step_end @log_id, 'SUCCESS', @records_processed = @total, @execution_details = @details;
         PRINT @details;

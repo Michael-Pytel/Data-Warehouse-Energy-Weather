@@ -285,7 +285,8 @@ CREATE TABLE dbo.fact_load (
     air_pressure_hpa          DECIMAL(7,2) NULL,
     heating_degree_hours      DECIMAL(6,3) NULL,       -- max(18 - temperature, 0) / 24; sums to degree-days
     cooling_degree_hours      DECIMAL(6,3) NULL,       -- max(temperature - 18, 0) / 24
-    loaded_at                 DATETIME2(0) NOT NULL CONSTRAINT DF_fact_load_loaded_at DEFAULT SYSUTCDATETIME(),
+    loaded_at                 DATETIME2(0) NOT NULL CONSTRAINT DF_fact_load_loaded_at DEFAULT SYSUTCDATETIME(),  -- first insert
+    updated_at                DATETIME2(0) NULL,       -- last change by a reload (NULL = never changed)
     CONSTRAINT PK_fact_load PRIMARY KEY (date_key, time_key, bidding_zone_key),
     CONSTRAINT FK_fact_load_date      FOREIGN KEY (date_key)                  REFERENCES dbo.dim_date (date_key),
     CONSTRAINT FK_fact_load_time      FOREIGN KEY (time_key)                  REFERENCES dbo.dim_time (time_key),
@@ -305,6 +306,7 @@ CREATE TABLE dbo.fact_generation (
     is_public_holiday         NVARCHAR(3)   NOT NULL,
     generation_mwh            DECIMAL(12,2) NULL,
     loaded_at                 DATETIME2(0)  NOT NULL CONSTRAINT DF_fact_generation_loaded_at DEFAULT SYSUTCDATETIME(),
+    updated_at                DATETIME2(0)  NULL,
     CONSTRAINT PK_fact_generation PRIMARY KEY (date_key, time_key, bidding_zone_key, generation_type_key),
     CONSTRAINT FK_fact_generation_date    FOREIGN KEY (date_key)                  REFERENCES dbo.dim_date (date_key),
     CONSTRAINT FK_fact_generation_time    FOREIGN KEY (time_key)                  REFERENCES dbo.dim_time (time_key),
@@ -312,6 +314,13 @@ CREATE TABLE dbo.fact_generation (
     CONSTRAINT FK_fact_generation_profile FOREIGN KEY (socioeconomic_profile_key) REFERENCES dbo.dim_socioeconomic_profile (socioeconomic_profile_key),
     CONSTRAINT FK_fact_generation_type    FOREIGN KEY (generation_type_key)       REFERENCES dbo.dim_generation_type (generation_type_key)
 );
+GO
+
+-- updated_at added in step 2.4 (existing databases)
+IF COL_LENGTH(N'dbo.fact_load', N'updated_at') IS NULL
+    ALTER TABLE dbo.fact_load ADD updated_at DATETIME2(0) NULL;
+IF COL_LENGTH(N'dbo.fact_generation', N'updated_at') IS NULL
+    ALTER TABLE dbo.fact_generation ADD updated_at DATETIME2(0) NULL;
 GO
 
 -- Indexes for filtering by zone (the primary keys already start with date and hour)
@@ -388,7 +397,8 @@ BEGIN
 END;
 GO
 
--- SSIS task "Start Run": stops if another run is in progress (started less than 2 hours ago),
+-- SSIS task "Start Run": stops if another run is in progress (started less than 12 hours ago; a full
+-- 3-year load takes ~1.5 hours because of the Open-Meteo hourly limit),
 -- closes rows left RUNNING by crashed runs as ABANDONED, and returns the new run's log_id.
 CREATE OR ALTER PROCEDURE dbo.usp_etl_run_start
 AS
@@ -396,8 +406,8 @@ BEGIN
     SET NOCOUNT ON;
     IF EXISTS (SELECT 1 FROM dbo.etl_log
                WHERE process_name = 'ETL_RUN' AND status = 'RUNNING'
-                 AND start_time > DATEADD(HOUR, -2, SYSDATETIME()))
-        THROW 50001, 'Another ETL run is in progress (ETL_RUN row with status RUNNING, started less than 2 hours ago). If it crashed, close it with: EXEC dbo.usp_etl_run_end <log_id>, ''ABANDONED''', 1;
+                 AND start_time > DATEADD(HOUR, -12, SYSDATETIME()))
+        THROW 50001, 'Another ETL run is in progress (ETL_RUN row with status RUNNING, started less than 12 hours ago). If it crashed, close it with: EXEC dbo.usp_etl_run_end <log_id>, ''ABANDONED''', 1;
 
     UPDATE dbo.etl_log
     SET end_time = SYSDATETIME(), status = 'ABANDONED',
