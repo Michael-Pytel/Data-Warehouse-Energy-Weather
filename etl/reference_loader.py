@@ -7,14 +7,15 @@ Load reference data that is easier to build in Python than in T-SQL:
 Usage (SSIS task "Load Reference Data"):
     python reference_loader.py <start_date> <end_date>
 
-Holidays are loaded for every year between the two dates; existing rows are kept, missing ones added.
+Holidays are loaded for every year of [start_date, end_date) (end exclusive, like the extract scripts);
+existing rows are kept, missing ones added.
 Tables are defined in database/create_warehouse.sql.
 """
 
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 import holidays
 import pyodbc
@@ -75,7 +76,8 @@ def main():
         print("Usage: python reference_loader.py <start_date> <end_date>")
         sys.exit(1)
     start = date.fromisoformat(sys.argv[1].strip('"')[:10])
-    end = date.fromisoformat(sys.argv[2].strip('"')[:10])
+    end = date.fromisoformat(sys.argv[2].strip('"')[:10])   # exclusive, like the extract scripts
+    last_day = end - timedelta(days=1) if end > start else end
 
     connection_string = os.getenv('DW_CONNECTION_STRING') or DEFAULT_CONNECTION_STRING
     try:
@@ -84,7 +86,7 @@ def main():
                 cursor = conn.cursor()
                 cursor.fast_executemany = True
                 zones_loaded = load_bidding_zones(cursor)
-                holidays_added = load_public_holidays(cursor, start.year, end.year)
+                holidays_added = load_public_holidays(cursor, start.year, last_day.year)
                 conn.commit()
             step.records = zones_loaded + holidays_added
             step.details = f"staging_bidding_zone: {zones_loaded} zones; ref_public_holiday: +{holidays_added} holidays"
