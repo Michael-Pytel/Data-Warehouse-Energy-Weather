@@ -45,15 +45,6 @@
     </DTS:Variable>
     <DTS:Variable
       DTS:CreationName=""
-      DTS:DTSID="{07DEA140-7228-45DE-BB9A-CC95FD4AB174}"
-      DTS:IncludeInDebugDump="2345"
-      DTS:Namespace="User"
-      DTS:ObjectName="ProcessStatus">
-      <DTS:VariableValue
-        DTS:DataType="8">INITIAL</DTS:VariableValue>
-    </DTS:Variable>
-    <DTS:Variable
-      DTS:CreationName=""
       DTS:DTSID="{C8C0D967-643A-447F-A2B9-CE5E4CDBFAF6}"
       DTS:IncludeInDebugDump="2345"
       DTS:Namespace="User"
@@ -66,7 +57,7 @@
       DTS:DTSID="{952F6C38-C352-457E-86A9-709206CB9555}"
       DTS:IncludeInDebugDump="6789"
       DTS:Namespace="User"
-      DTS:ObjectName="RecordsProcessed">
+      DTS:ObjectName="RunId">
       <DTS:VariableValue
         DTS:DataType="3">0</DTS:VariableValue>
     </DTS:Variable>
@@ -100,24 +91,24 @@
   </DTS:Variables>
   <DTS:Executables>
     <DTS:Executable
-      DTS:refId="Package\DW_connection"
+      DTS:refId="Package\Start Run"
       DTS:CreationName="Microsoft.ExecuteSQLTask"
       DTS:Description="Execute SQL Task"
       DTS:DTSID="{D0684100-9B88-4F81-8E71-63FF1CF9504F}"
       DTS:ExecutableType="Microsoft.ExecuteSQLTask"
       DTS:LocaleID="-1"
-      DTS:ObjectName="DW_connection"
+      DTS:ObjectName="Start Run"
       DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:ObjectData>
         <SQLTask:SqlTaskData
           SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
-          SQLTask:SqlStatementSource="DECLARE @LastProcessStatus NVARCHAR(20);&#xA;DECLARE @LastProcessStartTime DATETIME;&#xA;&#xA;SELECT TOP 1 &#xA;    @LastProcessStatus = status, &#xA;    @LastProcessStartTime = start_time&#xA;FROM etl_log &#xA;WHERE process_name = 'FULL_ETL_PROCESS'&#xA;ORDER BY start_time DESC;&#xA;&#xA;-- Uznaj procesy starsze niż 2 godziny za nieaktywne, nawet jeśli mają status RUNNING&#xA;IF @LastProcessStatus = 'RUNNING' AND DATEDIFF(HOUR, @LastProcessStartTime, GETDATE()) &lt; 2&#xA;BEGIN&#xA;    RAISERROR('Previous ETL process is still running', 16, 1);&#xA;END&#xA;ELSE&#xA;BEGIN&#xA;    -- Kontynuuj normalnie&#xA;    SELECT 'OK' AS ProcessStatus;&#xA;END"
+          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_start;"
           SQLTask:ResultType="ResultSetType_SingleRow" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
           <SQLTask:ResultBinding
             SQLTask:ResultName="0"
-            SQLTask:DtsVariableName="User::ProcessStatus" />
+            SQLTask:DtsVariableName="User::RunId" />
         </SQLTask:SqlTaskData>
       </DTS:ObjectData>
     </DTS:Executable>
@@ -273,13 +264,37 @@
           WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
       </DTS:ObjectData>
     </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Finish Run"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:Description="Execute SQL Task"
+      DTS:DTSID="{5E3B1C2A-7D4F-4A8E-9B61-2C0F3E8D4A17}"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Finish Run"
+      DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData
+          SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_end ?, 'SUCCESS';" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
+          <SQLTask:ParameterBinding
+            SQLTask:ParameterName="0"
+            SQLTask:DtsVariableName="User::RunId"
+            SQLTask:ParameterDirection="Input"
+            SQLTask:DataType="3"
+            SQLTask:ParameterSize="-1" />
+        </SQLTask:SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
   </DTS:Executables>
   <DTS:PrecedenceConstraints>
     <DTS:PrecedenceConstraint
       DTS:refId="Package.PrecedenceConstraints[Constraint]"
       DTS:CreationName=""
       DTS:DTSID="{4D632AAF-1BC7-4163-BC34-A4368B868FD6}"
-      DTS:From="Package\DW_connection"
+      DTS:From="Package\Start Run"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint"
       DTS:To="Package\Extract Enstoe Data" />
@@ -331,7 +346,63 @@
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint 6"
       DTS:To="Package\Key Check" />
+    <DTS:PrecedenceConstraint
+      DTS:refId="Package.PrecedenceConstraints[Constraint 7]"
+      DTS:CreationName=""
+      DTS:DTSID="{A9C47E21-3B5D-4F08-8E6A-71D2B4C9F350}"
+      DTS:From="Package\Key Check"
+      DTS:LogicalAnd="True"
+      DTS:ObjectName="Constraint 7"
+      DTS:To="Package\Finish Run" />
   </DTS:PrecedenceConstraints>
+  <DTS:EventHandlers>
+    <DTS:EventHandler
+      DTS:refId="Package.EventHandlers[OnError]"
+      DTS:CreationName="OnError"
+      DTS:DTSID="{E7A1B3C5-9D2F-4E6A-8C0B-3F5D7A9E1C24}"
+      DTS:EventID="0"
+      DTS:EventName="OnError"
+      DTS:LocaleID="-1">
+      <DTS:Variables>
+        <DTS:Variable
+          DTS:CreationName=""
+          DTS:Description="The propagate property of the event"
+          DTS:DTSID="{4B9E2D7F-6A1C-4F3E-B8D5-0C2A7E9F1B36}"
+          DTS:IncludeInDebugDump="6789"
+          DTS:Namespace="System"
+          DTS:ObjectName="Propagate">
+          <DTS:VariableValue
+            DTS:DataType="11">-1</DTS:VariableValue>
+        </DTS:Variable>
+      </DTS:Variables>
+      <DTS:Executables>
+        <DTS:Executable
+          DTS:refId="Package.EventHandlers[OnError]\Fail Run"
+          DTS:CreationName="Microsoft.ExecuteSQLTask"
+          DTS:Description="Execute SQL Task"
+          DTS:DTSID="{C2D8F4B6-1E3A-4C7D-A5F9-8B0E6D2C4A93}"
+          DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+          DTS:LocaleID="-1"
+          DTS:ObjectName="Fail Run"
+          DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+          DTS:ThreadHint="0">
+          <DTS:Variables />
+          <DTS:ObjectData>
+            <SQLTask:SqlTaskData
+              SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+              SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_end ?, 'FAILED';" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
+              <SQLTask:ParameterBinding
+                SQLTask:ParameterName="0"
+                SQLTask:DtsVariableName="User::RunId"
+                SQLTask:ParameterDirection="Input"
+                SQLTask:DataType="3"
+                SQLTask:ParameterSize="-1" />
+            </SQLTask:SqlTaskData>
+          </DTS:ObjectData>
+        </DTS:Executable>
+      </DTS:Executables>
+    </DTS:EventHandler>
+  </DTS:EventHandlers>
   <DTS:DesignTimeProperties><![CDATA[<?xml version="1.0"?>
 <!--This CDATA section contains the layout information of the package. The section includes information such as (x,y) coordinates, width, and height.-->
 <!--If you manually edit this section and make a mistake, you can delete it. -->
@@ -346,7 +417,7 @@
         Capacity="16" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph" xmlns:mssgle="clr-namespace:Microsoft.SqlServer.Graph.LayoutEngine;assembly=Microsoft.SqlServer.Graph" xmlns:assembly="http://schemas.microsoft.com/winfx/2006/xaml">
         <NodeLayout
           Size="152,41.6"
-          Id="Package\DW_connection"
+          Id="Package\Start Run"
           TopLeft="350.000000745058,138.411764584559" />
         <NodeLayout
           Size="179.2,41.6"
@@ -546,6 +617,32 @@
                     Point3="27.1428572006374,29.1705881967522" />
                   <mssgle:LineSegment
                     End="27.1428572006374,42.8411763935045" />
+                </mssgle:SegmentCollection>
+              </mssgle:Curve.Segments>
+            </mssgle:Curve>
+          </EdgeLayout.Curve>
+          <EdgeLayout.Labels>
+            <EdgeLabelCollection />
+          </EdgeLayout.Labels>
+        </EdgeLayout>
+        <NodeLayout
+          Size="152,41.6"
+          Id="Package\Finish Run"
+          TopLeft="365.000000745058,800" />
+        <EdgeLayout
+          Id="Package.PrecedenceConstraints[Constraint 7]"
+          TopLeft="440.885715007965,754.905882058682">
+          <EdgeLayout.Curve>
+            <mssgle:Curve
+              StartConnector="{assembly:Null}"
+              EndConnector="0,45.094117941318"
+              Start="0,0"
+              End="0,37.594117941318">
+              <mssgle:Curve.Segments>
+                <mssgle:SegmentCollection
+                  Capacity="5">
+                  <mssgle:LineSegment
+                    End="0,37.594117941318" />
                 </mssgle:SegmentCollection>
               </mssgle:Curve.Segments>
             </mssgle:Curve>
