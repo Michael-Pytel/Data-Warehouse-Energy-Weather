@@ -7,7 +7,7 @@ Pobiera dane socjoekonomiczne dla krajów UE
 import requests
 import pandas as pd
 import zones
-from etl_log import EtlStep
+from etl_log import EtlStep, start_run_log
 from datetime import datetime, timedelta
 import time
 import logging
@@ -1167,6 +1167,7 @@ def print_summary_to_console(raw_data, integrated_data):
 
 def main():
     """Główna funkcja wywoływana przez SSIS"""
+    start_run_log('eurostat_client')
     import sys
     import os
     from datetime import datetime

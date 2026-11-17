@@ -21,7 +21,7 @@ import holidays
 import pyodbc
 
 import zones
-from etl_log import EtlStep
+from etl_log import EtlStep, start_run_log
 
 DEFAULT_CONNECTION_STRING = ("Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;"
                              "Trusted_Connection=yes;TrustServerCertificate=yes;")
@@ -72,6 +72,7 @@ def load_public_holidays(cursor, first_year: int, last_year: int) -> int:
 
 
 def main():
+    start_run_log('reference_loader')
     if len(sys.argv) < 3:
         print("Usage: python reference_loader.py <start_date> <end_date>")
         sys.exit(1)

@@ -10,7 +10,7 @@ import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
 import zones
-from etl_log import EtlStep
+from etl_log import EtlStep, start_run_log
 from datetime import datetime, timedelta
 import time
 import logging
@@ -463,6 +463,7 @@ class ENTSOEClient:
 # Funkcja główna do uruchomienia z SSIS
 def main():
     """Główna funkcja wywoływana przez SSIS"""
+    start_run_log('entsoe_client')
     # Konfiguracja logowania
     import sys
     import os

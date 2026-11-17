@@ -19,7 +19,7 @@ import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from etl_log import EtlStep
+from etl_log import EtlStep, start_run_log
 
 # Open-Meteo free tier: 600 calls/minute, 5,000/hour, 10,000/day per IP address. A request counts as several
 # calls when it covers more than 2 weeks or more than 10 variables (weight = days/14 x variables/10, at least 1).
@@ -488,6 +488,7 @@ class OpenMeteoClient:
 # Funkcja główna do uruchomienia z SSIS
 def main():
     """Główna funkcja wywoływana przez SSIS"""
+    start_run_log('open_meteo_client')
     import sys
     import os
     from datetime import datetime, timedelta

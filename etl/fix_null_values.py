@@ -19,7 +19,7 @@ import sys
 
 import pyodbc
 
-from etl_log import EtlStep
+from etl_log import EtlStep, start_run_log
 
 DEFAULT_CONNECTION_STRING = ("Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;"
                              "Trusted_Connection=yes;TrustServerCertificate=yes;")
@@ -60,6 +60,7 @@ def check_table(cursor, table: str, key_columns: list) -> list:
 
 
 def main():
+    start_run_log('fix_null_values')
     connection_string = os.getenv('DW_CONNECTION_STRING') or DEFAULT_CONNECTION_STRING
     try:
         with EtlStep('KEY_CHECK', connection_string) as step:
