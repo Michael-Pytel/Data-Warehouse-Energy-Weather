@@ -7,6 +7,7 @@ Pobiera dane socjoekonomiczne dla krajów UE
 import requests
 import pandas as pd
 import zones
+from etl_log import EtlStep
 from datetime import datetime, timedelta
 import time
 import logging
@@ -1200,55 +1201,58 @@ def main():
         countries_arg = sys.argv[2]
         countries_to_process = [c.strip().upper() for c in countries_arg.split(',')]
     
-    try:
-        # Inicjalizacja klienta
-        client = EurostatClient(connection_string)
-        
-        # Ekstrakcja surowych danych
-        logger.info(f"Starting Eurostat data extraction from year {since_year}")
-        raw_data = client.extract_all_socioeconomic_data(since_year, countries_to_process)
-        
-        # Przygotowanie zintegrowanych danych
-        logger.info("Preparing integrated data...")
-        integrated_data = client.prepare_integrated_socioeconomic_data(raw_data)
-        
-        # Wyświetlenie podsumowania
-        print_summary_to_console(raw_data, integrated_data)
-        
-        # Eksport do CSV (zawsze)
-        logger.info("Exporting data to CSV files...")
-        csv_success = client.export_to_csv(raw_data, integrated_data)
-        
-        # Zapis do staging tylko jeśli mamy connection string
-        db_success = True
-        if connection_string:
-            logger.info("Saving data to staging tables...")
-            db_success = client.save_to_staging(raw_data)
-        else:
-            logger.warning("No database connection string provided - skipping database save")
-        
-        # Generuj szczegółowe podsumowanie
-        summary = client.get_data_summary(raw_data, integrated_data)
-        
-        # Zapisz podsumowanie do pliku JSON
+    with EtlStep('EUROSTAT_EXTRACT', connection_string) as step:
         try:
-            with open('eurostat_extraction_summary.json', 'w', encoding='utf-8') as f:
-                json.dump(summary, f, indent=2, ensure_ascii=False)
-            logger.info("Detailed summary saved to eurostat_extraction_summary.json")
-        except Exception as e:
-            logger.warning(f"Could not save summary to file: {str(e)}")
+            # Inicjalizacja klienta
+            client = EurostatClient(connection_string)
         
-        if csv_success and db_success:
-            logger.info("Eurostat data extraction completed successfully")
-            sys.exit(0)
-        else:
-            logger.warning("Eurostat data extraction completed with warnings")
-            sys.exit(1)
+            # Ekstrakcja surowych danych
+            logger.info(f"Starting Eurostat data extraction from year {since_year}")
+            raw_data = client.extract_all_socioeconomic_data(since_year, countries_to_process)
+        
+            # Przygotowanie zintegrowanych danych
+            logger.info("Preparing integrated data...")
+            integrated_data = client.prepare_integrated_socioeconomic_data(raw_data)
+        
+            # Wyświetlenie podsumowania
+            print_summary_to_console(raw_data, integrated_data)
+        
+            # Eksport do CSV (zawsze)
+            logger.info("Exporting data to CSV files...")
+            csv_success = client.export_to_csv(raw_data, integrated_data)
+        
+            # Zapis do staging tylko jeśli mamy connection string
+            db_success = True
+            if connection_string:
+                logger.info("Saving data to staging tables...")
+                db_success = client.save_to_staging(raw_data)
+                step.records = sum(len(df) for df in raw_data.values())
+                step.details = ', '.join(f"{name}: {len(df)}" for name, df in raw_data.items())
+            else:
+                logger.warning("No database connection string provided - skipping database save")
+        
+            # Generuj szczegółowe podsumowanie
+            summary = client.get_data_summary(raw_data, integrated_data)
+        
+            # Zapisz podsumowanie do pliku JSON
+            try:
+                with open('eurostat_extraction_summary.json', 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, indent=2, ensure_ascii=False)
+                logger.info("Detailed summary saved to eurostat_extraction_summary.json")
+            except Exception as e:
+                logger.warning(f"Could not save summary to file: {str(e)}")
+        
+            if csv_success and db_success:
+                logger.info("Eurostat data extraction completed successfully")
+                sys.exit(0)
+            else:
+                logger.warning("Eurostat data extraction completed with warnings")
+                sys.exit(1)
             
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
-        traceback.print_exc()
-        sys.exit(1)
+        except Exception as e:
+            logger.error(f"Fatal error: {str(e)}")
+            traceback.print_exc()
+            sys.exit(1)
 
 
 if __name__ == "__main__":

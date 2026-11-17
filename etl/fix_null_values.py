@@ -19,6 +19,8 @@ import sys
 
 import pyodbc
 
+from etl_log import EtlStep
+
 DEFAULT_CONNECTION_STRING = ("Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;"
                              "Trusted_Connection=yes;TrustServerCertificate=yes;")
 
@@ -60,20 +62,15 @@ def check_table(cursor, table: str, key_columns: list) -> list:
 def main():
     connection_string = os.getenv('DW_CONNECTION_STRING') or DEFAULT_CONNECTION_STRING
     try:
-        with pyodbc.connect(connection_string) as conn:
-            cursor = conn.cursor()
-            cursor.execute("EXEC dbo.sp_log_etl_process 'KEY_CHECK', 'RUNNING'")
-            conn.commit()
-
-            findings = []
-            for table, key_columns in FACT_KEYS.items():
-                findings += check_table(cursor, table, key_columns)
-            conn.commit()
-
-            details = '; '.join(findings) if findings else 'all keys matched'
-            cursor.execute("EXEC dbo.sp_log_etl_process 'KEY_CHECK', 'SUCCESS', @execution_details = ?", details)
-            conn.commit()
-        logger.info(f"Key check finished: {details}")
+        with EtlStep('KEY_CHECK', connection_string) as step:
+            with pyodbc.connect(connection_string) as conn:
+                cursor = conn.cursor()
+                findings = []
+                for table, key_columns in FACT_KEYS.items():
+                    findings += check_table(cursor, table, key_columns)
+                conn.commit()
+            step.details = '; '.join(findings) if findings else 'all keys matched'
+            logger.info(f"Key check finished: {step.details}")
     except Exception as e:
         logger.error(f"Key check failed: {e}")
         sys.exit(1)

@@ -20,6 +20,7 @@ import holidays
 import pyodbc
 
 import zones
+from etl_log import EtlStep
 
 DEFAULT_CONNECTION_STRING = ("Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;"
                              "Trusted_Connection=yes;TrustServerCertificate=yes;")
@@ -78,13 +79,16 @@ def main():
 
     connection_string = os.getenv('DW_CONNECTION_STRING') or DEFAULT_CONNECTION_STRING
     try:
-        with pyodbc.connect(connection_string) as conn:
-            cursor = conn.cursor()
-            cursor.fast_executemany = True
-            zones_loaded = load_bidding_zones(cursor)
-            holidays_added = load_public_holidays(cursor, start.year, end.year)
-            conn.commit()
-        logger.info(f"Reference data loaded: {zones_loaded} bidding zones, {holidays_added} new holidays")
+        with EtlStep('REFERENCE_DATA', connection_string) as step:
+            with pyodbc.connect(connection_string) as conn:
+                cursor = conn.cursor()
+                cursor.fast_executemany = True
+                zones_loaded = load_bidding_zones(cursor)
+                holidays_added = load_public_holidays(cursor, start.year, end.year)
+                conn.commit()
+            step.records = zones_loaded + holidays_added
+            step.details = f"staging_bidding_zone: {zones_loaded} zones; ref_public_holiday: +{holidays_added} holidays"
+            logger.info(f"Reference data loaded: {zones_loaded} bidding zones, {holidays_added} new holidays")
     except Exception as e:
         logger.error(f"Reference data load failed: {e}")
         sys.exit(1)

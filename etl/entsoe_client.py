@@ -10,6 +10,7 @@ import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
 import zones
+from etl_log import EtlStep
 from datetime import datetime, timedelta
 import time
 import logging
@@ -492,10 +493,7 @@ class ENTSOEClient:
             Słownik z DataFrame'ami dla różnych typów danych
         """
         self.logger.info(f"Starting ENTSO-E data extraction from {start_date} to {end_date}")
-        
-        # Logowanie rozpoczęcia procesu
-        self._log_process('ENTSO-E_EXTRACTION', 'RUNNING')
-        
+
         all_data = {
             'actual_load': [],
             'generation': [],
@@ -569,16 +567,12 @@ class ENTSOEClient:
                     self.logger.warning(f"No DataFrames to combine for {data_type}")
                     final_data[data_type] = pd.DataFrame()
             
-            # Logowanie sukcesu
-            self._log_process('ENTSO-E_EXTRACTION', 'SUCCESS', total_records)
-            
             return final_data
-            
+
         except Exception as e:
             self.logger.error(f"Error during data extraction: {str(e)}")
             import traceback
             self.logger.error(traceback.format_exc())
-            self._log_process('ENTSO-E_EXTRACTION', 'FAILED', 0, str(e))
             raise
     
     def save_to_staging(self, data: Dict[str, pd.DataFrame]) -> bool:
@@ -773,27 +767,6 @@ class ENTSOEClient:
             except Exception as csv_e:
                 self.logger.error(f"Error saving to CSV: {str(csv_e)}")
     
-    def _log_process(self, process_name: str, status: str, records: int = 0, error_msg: str = None):
-        """Logowanie procesu do bazy danych"""
-        try:
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                IF OBJECT_ID('dbo.sp_log_etl_process', 'P') IS NOT NULL
-                    EXEC sp_log_etl_process ?, ?, ?, ?
-                ELSE
-                BEGIN
-                    PRINT 'Stored procedure sp_log_etl_process not found, logging to console instead';
-                END
-            """, (process_name, status, records, error_msg))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            self.logger.error(f"Error logging process: {str(e)}")
-
 # Funkcja główna do uruchomienia z SSIS
 def main():
     """Główna funkcja wywoływana przez SSIS"""
@@ -901,35 +874,38 @@ def main():
             sys.exit(1)
     
     logger.info(f"Data extraction period: {start_date} to {end_date}")
-    
-    try:
-        # Inicjalizacja klienta
-        client = ENTSOEClient(token, connection_string)
-        
-        # Ekstrakcja danych
-        data = client.extract_all_data(start_date, end_date)
-        
-        for data_type, df in data.items():
-            if df.empty:
-                logger.warning(f"DataFrame for {data_type} is empty!")
+
+    with EtlStep('ENTSOE_EXTRACT', connection_string) as step:
+        try:
+            # Inicjalizacja klienta
+            client = ENTSOEClient(token, connection_string)
+
+            # Ekstrakcja danych
+            data = client.extract_all_data(start_date, end_date)
+
+            for data_type, df in data.items():
+                if df.empty:
+                    logger.warning(f"DataFrame for {data_type} is empty!")
+                else:
+                    logger.info(f"DataFrame for {data_type} contains {len(df)} rows and {len(df.columns)} columns")
+                    logger.info(f"Columns: {df.columns.tolist()}")
+                    logger.info(f"First row sample: {df.iloc[0].to_dict()}")
+
+            # Zapis do staging
+            success = client.save_to_staging(data)
+            step.records = sum(len(df) for df in data.values())
+            step.details = ', '.join(f"{data_type}: {len(df)}" for data_type, df in data.items())
+
+            if success:
+                logger.info("ENTSO-E data extraction completed successfully")
+                sys.exit(0)
             else:
-                logger.info(f"DataFrame for {data_type} contains {len(df)} rows and {len(df.columns)} columns")
-                logger.info(f"Columns: {df.columns.tolist()}")
-                logger.info(f"First row sample: {df.iloc[0].to_dict()}")
-            
-        # Zapis do staging
-        success = client.save_to_staging(data)
-        
-        if success:
-            logger.info("ENTSO-E data extraction completed successfully")
-            sys.exit(0)
-        else:
-            logger.error("Error occurred during data extraction")
+                logger.error("Error occurred during data extraction")
+                sys.exit(1)
+
+        except Exception as e:
+            logger.error(f"Fatal error: {str(e)}", exc_info=True)
             sys.exit(1)
-            
-    except Exception as e:
-        logger.error(f"Fatal error: {str(e)}", exc_info=True)
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,8 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from etl_log import EtlStep
+
 # Parallel requests to the archive API (free tier: 600 calls/minute)
 MAX_WORKERS = 8
 
@@ -374,11 +376,6 @@ class OpenMeteoClient:
         self.logger.info(f"Fetching weather for {len(self.weather_locations)} countries, {len(cities)} cities "
                          f"from {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d} ({MAX_WORKERS} parallel requests)")
 
-        try:
-            self._log_process('WEATHER_EXTRACTION_EU', 'RUNNING')
-        except Exception as e:
-            self.logger.warning(f"Error logging process: {str(e)}")
-
         parts, failed = [], []
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futures = {executor.submit(self.fetch_location, country_code, zone_name, subzone, start_date, end_date): subzone['name']
@@ -395,19 +392,12 @@ class OpenMeteoClient:
                 else:
                     parts.append(weather_df)
 
+        self.failed_cities = sorted(failed)
         if failed:
-            self.logger.warning(f"No data for {len(failed)} cities: {', '.join(sorted(failed))}")
+            self.logger.warning(f"No data for {len(failed)} cities: {', '.join(self.failed_cities)}")
 
         weather_data = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
         self.logger.info(f"Extracted {len(weather_data)} weather records")
-
-        try:
-            status = 'FAILED' if weather_data.empty else 'SUCCESS'
-            error = f"No data for: {', '.join(sorted(failed))}" if failed else None
-            self._log_process('WEATHER_EXTRACTION_EU', status, len(weather_data), error)
-        except Exception as e:
-            self.logger.warning(f"Error logging process: {str(e)}")
-
         return weather_data
 
     # Columns of staging_weather_data written by this script (table defined in database/create_warehouse.sql)
@@ -451,56 +441,6 @@ class OpenMeteoClient:
             self.logger.error(f"Error saving data to staging: {str(e)}")
             return False
 
-
-    def _log_process(self, process_name: str, status: str, records: int = 0, error_msg: str = None):
-        """Logowanie procesu do bazy danych"""
-        try:
-            conn = pyodbc.connect(self.connection_string)
-            cursor = conn.cursor()
-            
-            # Najpierw sprawdź czy procedura istnieje
-            try:
-                cursor.execute("""
-                    SELECT 1 FROM sys.objects WHERE type = 'P' AND name = 'sp_log_etl_process'
-                """)
-                procedure_exists = cursor.fetchone() is not None
-            except:
-                procedure_exists = False
-            
-            if procedure_exists:
-                cursor.execute("""
-                    EXEC sp_log_etl_process ?, ?, ?, ?
-                """, (process_name, status, records, error_msg))
-            else:
-                # Jeśli procedura nie istnieje, utwórz tabelę logowania i wstaw bezpośrednio
-                self.logger.warning("Stored procedure sp_log_etl_process not found, creating log table and inserting directly")
-                
-                # Sprawdź czy tabela istnieje
-                cursor.execute("""
-                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'etl_process_log')
-                    CREATE TABLE etl_process_log (
-                        id BIGINT IDENTITY(1,1) PRIMARY KEY,
-                        process_name NVARCHAR(100) NOT NULL,
-                        status NVARCHAR(20) NOT NULL,
-                        records_processed INT NOT NULL DEFAULT 0,
-                        error_message NVARCHAR(MAX),
-                        start_time DATETIME2 DEFAULT GETDATE(),
-                        end_time DATETIME2 DEFAULT GETDATE()
-                    )
-                """)
-                
-                # Wstaw rekord logu
-                cursor.execute("""
-                    INSERT INTO etl_process_log (process_name, status, records_processed, error_message)
-                    VALUES (?, ?, ?, ?)
-                """, (process_name, status, records, error_msg))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            self.logger.error(f"Error logging process: {str(e)}")
-            # Nie rzucaj wyjątku aby nie przerywać głównego procesu
 
 # Funkcja główna do uruchomienia z SSIS
 def main():
@@ -548,51 +488,55 @@ def main():
     print(f"Data extraction period: {start_date} to {end_date}")
     print("Starting EU weather data extraction for all 27 EU countries...")
     
-    try:
-        # Inicjalizacja klienta
-        client = OpenMeteoClient(connection_string)
+    with EtlStep('WEATHER_EXTRACT', connection_string) as step:
+        try:
+            # Inicjalizacja klienta
+            client = OpenMeteoClient(connection_string)
         
-        # Wyświetl informacje o krajach i miastach do przetworzenia
-        total_countries = len(client.weather_locations)
-        total_cities = sum(len(zone_info['subzones']) for zone_info in client.weather_locations.values())
-        print(f"Processing {total_countries} EU countries with {total_cities} cities:")
+            # Wyświetl informacje o krajach i miastach do przetworzenia
+            total_countries = len(client.weather_locations)
+            total_cities = sum(len(zone_info['subzones']) for zone_info in client.weather_locations.values())
+            print(f"Processing {total_countries} EU countries with {total_cities} cities:")
         
-        for country_code, zone_info in client.weather_locations.items():
-            cities = [subzone['name'] for subzone in zone_info['subzones']]
-            print(f"  {zone_info['name']} ({country_code}): {', '.join(cities)}")
+            for country_code, zone_info in client.weather_locations.items():
+                cities = [subzone['name'] for subzone in zone_info['subzones']]
+                print(f"  {zone_info['name']} ({country_code}): {', '.join(cities)}")
         
-        print("\nStarting weather data extraction...")
-        weather_data = client.extract_all(start_date, end_date)
+            print("\nStarting weather data extraction...")
+            weather_data = client.extract_all(start_date, end_date)
 
-        if weather_data.empty:
-            print("Warning: No weather data extracted")
-        else:
-            print(f"Successfully extracted {len(weather_data)} weather records for all EU subzones")
+            if weather_data.empty:
+                print("Warning: No weather data extracted")
+            else:
+                print(f"Successfully extracted {len(weather_data)} weather records for all EU subzones")
             
-            # Podsumowanie danych per kraj
-            country_summary = weather_data.groupby('country_code').size().reset_index(name='records')
-            print("\nWeather data summary by country:")
-            for _, row in country_summary.iterrows():
-                country_name = client.weather_locations[row['country_code']]['name']
-                print(f"  {country_name} ({row['country_code']}): {row['records']} records")
+                # Podsumowanie danych per kraj
+                country_summary = weather_data.groupby('country_code').size().reset_index(name='records')
+                print("\nWeather data summary by country:")
+                for _, row in country_summary.iterrows():
+                    country_name = client.weather_locations[row['country_code']]['name']
+                    print(f"  {country_name} ({row['country_code']}): {row['records']} records")
         
-        # Zapis do staging
-        print("\nSaving data to staging tables...")
-        success = client.save_to_staging(weather_data)
+            # Zapis do staging
+            print("\nSaving data to staging tables...")
+            success = client.save_to_staging(weather_data)
+            step.records = len(weather_data)
+            if client.failed_cities:
+                step.details = f"No data for {len(client.failed_cities)} cities: {', '.join(client.failed_cities)}"
 
-        if success:
-            print("EU weather data extraction completed successfully")
-            print(f"Total weather records: {len(weather_data)}")
-            sys.exit(0)
-        else:
-            print("Error occurred during EU weather data extraction")
+            if success:
+                print("EU weather data extraction completed successfully")
+                print(f"Total weather records: {len(weather_data)}")
+                sys.exit(0)
+            else:
+                print("Error occurred during EU weather data extraction")
+                sys.exit(1)
+            
+        except Exception as e:
+            print(f"Fatal error: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
             sys.exit(1)
-            
-    except Exception as e:
-        print(f"Fatal error: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        sys.exit(1)
 
 if __name__ == "__main__":
     main()
