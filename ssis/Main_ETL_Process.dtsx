@@ -122,40 +122,35 @@
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
-      DTS:refId="Package\Execute DataCleaner Task"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
+      DTS:refId="Package\Load Facts"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:Description="Execute SQL Task"
       DTS:DTSID="{EDCB81F6-AC7D-4D90-B978-143AC158A3DC}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Execute DataCleaner Task"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ObjectName="Load Facts"
+      DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
       <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="warehouse_builder.py"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+        <SQLTask:SqlTaskData
+          SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+          SQLTask:SqlStatementSource="EXEC dbo.usp_load_facts;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
-      DTS:refId="Package\Execute DimensionProcessor"
+      DTS:refId="Package\Load Reference Data"
       DTS:CreationName="Microsoft.ExecuteProcess"
       DTS:Description="Execute Process Task"
       DTS:DTSID="{4AFBCCEC-3B86-49DC-BB6C-5D06FCF322F4}"
       DTS:ExecutableType="Microsoft.ExecuteProcess"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Execute DimensionProcessor"
+      DTS:ObjectName="Load Reference Data"
       DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:PropertyExpression
-        DTS:Name="Arguments">"dimension_processor.py" + " \""+@[User::StartDate] + "\" " + "\""+"2026-12-31"+"\""</DTS:PropertyExpression>
+        DTS:Name="Arguments">"reference_loader.py \"" + @[User::StartDate] + "\" \"" + @[User::EndDate] + "\""</DTS:PropertyExpression>
       <DTS:PropertyExpression
         DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
       <DTS:PropertyExpression
@@ -163,7 +158,7 @@
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
-          Arguments="dimension_processor.py &quot;2023-12-30&quot; &quot;2026-12-31&quot;"
+          Arguments="reference_loader.py &quot;2023-12-30&quot; &quot;2024-01-02&quot;"
           WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
       </DTS:ObjectData>
     </DTS:Executable>
@@ -192,35 +187,30 @@
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
-      DTS:refId="Package\Execute FactProcessor"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
+      DTS:refId="Package\Load Dimensions"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:Description="Execute SQL Task"
       DTS:DTSID="{9858AB04-BC0C-423E-8527-DB70F6EBBF48}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Execute FactProcessor"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ObjectName="Load Dimensions"
+      DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
       <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="fact_processor.py"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+        <SQLTask:SqlTaskData
+          SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+          SQLTask:SqlStatementSource="EXEC dbo.usp_load_dimensions;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
-      DTS:refId="Package\Execute NullHandling Task"
+      DTS:refId="Package\Key Check"
       DTS:CreationName="Microsoft.ExecuteProcess"
       DTS:Description="Execute Process Task"
       DTS:DTSID="{8A0D8C41-8693-4126-98B5-99491344FD91}"
       DTS:ExecutableType="Microsoft.ExecuteProcess"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Execute NullHandling Task"
+      DTS:ObjectName="Key Check"
       DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
@@ -316,31 +306,31 @@
       DTS:From="Package\Execute Eurostat Data"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint 3"
-      DTS:To="Package\Execute DimensionProcessor" />
+      DTS:To="Package\Load Reference Data" />
     <DTS:PrecedenceConstraint
       DTS:refId="Package.PrecedenceConstraints[Constraint 4]"
       DTS:CreationName=""
       DTS:DTSID="{2A635066-E475-4F43-8BB3-EB6EF4E24753}"
-      DTS:From="Package\Execute DimensionProcessor"
+      DTS:From="Package\Load Reference Data"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint 4"
-      DTS:To="Package\Execute FactProcessor" />
+      DTS:To="Package\Load Dimensions" />
     <DTS:PrecedenceConstraint
       DTS:refId="Package.PrecedenceConstraints[Constraint 5]"
       DTS:CreationName=""
       DTS:DTSID="{2F5A908D-AD1F-45AD-A99A-7943B4830851}"
-      DTS:From="Package\Execute FactProcessor"
+      DTS:From="Package\Load Dimensions"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint 5"
-      DTS:To="Package\Execute DataCleaner Task" />
+      DTS:To="Package\Load Facts" />
     <DTS:PrecedenceConstraint
       DTS:refId="Package.PrecedenceConstraints[Constraint 6]"
       DTS:CreationName=""
       DTS:DTSID="{C488C3B3-EE5C-4BB3-A2D9-7F04954680C2}"
-      DTS:From="Package\Execute DataCleaner Task"
+      DTS:From="Package\Load Facts"
       DTS:LogicalAnd="True"
       DTS:ObjectName="Constraint 6"
-      DTS:To="Package\Execute NullHandling Task" />
+      DTS:To="Package\Key Check" />
   </DTS:PrecedenceConstraints>
   <DTS:DesignTimeProperties><![CDATA[<?xml version="1.0"?>
 <!--This CDATA section contains the layout information of the package. The section includes information such as (x,y) coordinates, width, and height.-->
@@ -360,7 +350,7 @@
           TopLeft="350.000000745058,138.411764584559" />
         <NodeLayout
           Size="179.2,41.6"
-          Id="Package\Execute DimensionProcessor"
+          Id="Package\Load Reference Data"
           TopLeft="323.571429260227,454.105882058682" />
         <NodeLayout
           Size="183.2,41.6"
@@ -368,7 +358,7 @@
           TopLeft="325.00000069184,383.988235005221" />
         <NodeLayout
           Size="183.2,41.6"
-          Id="Package\Execute FactProcessor"
+          Id="Package\Load Dimensions"
           TopLeft="327.142857839258,530.811764425029" />
         <NodeLayout
           Size="184,41.6"
@@ -490,7 +480,7 @@
         </EdgeLayout>
         <NodeLayout
           Size="179.2,41.6"
-          Id="Package\Execute DataCleaner Task"
+          Id="Package\Load Facts"
           TopLeft="312.142857807327,621.364705665177" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint 5]"
@@ -528,7 +518,7 @@
         </EdgeLayout>
         <NodeLayout
           Size="203.2,41.6"
-          Id="Package\Execute NullHandling Task"
+          Id="Package\Key Check"
           TopLeft="339.285715007965,713.305882058682" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint 6]"
