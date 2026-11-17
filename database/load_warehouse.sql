@@ -153,7 +153,8 @@ GO
 -- Years: every year in the Eurostat staging data and every year of the energy staging data.
 -- -------------------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_load_dim_socioeconomic_profile
-    @new_versions INT = 0 OUTPUT
+    @new_versions INT = 0 OUTPUT,
+    @kept_profiles INT = 0 OUTPUT   -- current country-years not covered by the Eurostat staging data
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -179,24 +180,62 @@ BEGIN
     UNION SELECT YEAR(timestamp) FROM dbo.staging_entso_forecast
     UNION SELECT YEAR(timestamp) FROM dbo.staging_entso_generation;
 
-    -- one value per country, year and indicator: own year, else latest earlier year
-    SELECT c.country_code, y.year, i.indicator,
-           COALESCE(f.value, p.value) AS value,
+    SELECT * INTO #ind
+    FROM (VALUES ('population', 'population'), ('gdp_per_capita', 'GDP'),
+                 ('electricity_prices', 'electricity price'), ('energy_intensity', 'energy intensity'),
+                 ('unemployment_rate', 'unemployment')) AS i (indicator, label);
+
+    -- current versions, one row per indicator, with that indicator's part of the estimate note
+    SELECT h.country_code, h.year, i.indicator, v.value, n.note
+    INTO #cur
+    FROM dbo.dim_socioeconomic_profile_history h
+    CROSS JOIN #ind i
+    CROSS APPLY (SELECT CASE i.indicator
+                            WHEN 'population'         THEN CAST(h.population AS FLOAT)
+                            WHEN 'gdp_per_capita'     THEN CAST(h.gdp_per_capita_eur AS FLOAT)
+                            WHEN 'electricity_prices' THEN CAST(h.electricity_price_eur_kwh AS FLOAT)
+                            WHEN 'energy_intensity'   THEN CAST(h.energy_intensity AS FLOAT)
+                            WHEN 'unemployment_rate'  THEN CAST(h.unemployment_rate_pct AS FLOAT)
+                        END AS value) v
+    OUTER APPLY (SELECT TOP (1) LTRIM(s.value) AS note FROM STRING_SPLIT(h.estimate_note, ';') s
+                 WHERE LTRIM(s.value) LIKE i.label + ' %') n
+    WHERE h.is_current = 'Yes';
+
+    -- Country-years this Eurostat download speaks for: its countries, from its first year on.
+    -- A country or year missing from staging (run for a country subset, a later SinceYear, empty
+    -- staging) is not a sign that the figures are gone: those country-years keep their current
+    -- version. Country-years without any profile yet are still created.
+    DECLARE @first_year SMALLINT = (SELECT MIN(year) FROM #fig);
+    SELECT c.country_code, y.year
+    INTO #cy
+    FROM #countries c
+    CROSS JOIN #years y
+    WHERE (y.year >= @first_year AND EXISTS (SELECT 1 FROM #fig f WHERE f.country_code = c.country_code))
+       OR NOT EXISTS (SELECT 1 FROM #cur k WHERE k.country_code = c.country_code AND k.year = y.year);
+
+    SELECT @kept_profiles = COUNT(*)
+    FROM (SELECT DISTINCT country_code, year FROM #cur) k
+    WHERE NOT EXISTS (SELECT 1 FROM #cy WHERE #cy.country_code = k.country_code AND #cy.year = k.year);
+
+    -- one value per country, year and indicator: own year, else latest earlier year;
+    -- if staging has neither, the stored figure stays (a figure is never replaced by NULL)
+    SELECT cy.country_code, cy.year, i.indicator,
+           COALESCE(f.value, p.value, k.value) AS value,
            CASE WHEN f.value IS NULL AND p.value IS NOT NULL
                     THEN CONCAT(i.label, ' from ', p.year)
                 WHEN i.indicator = 'electricity_prices' AND f.n_periods = 1
                     THEN CONCAT(i.label, ' from one half-year only')
+                WHEN f.value IS NULL AND p.value IS NULL
+                    THEN k.note
            END AS note
     INTO #val
-    FROM #countries c
-    CROSS JOIN #years y
-    CROSS JOIN (VALUES ('population', 'population'), ('gdp_per_capita', 'GDP'),
-                       ('electricity_prices', 'electricity price'), ('energy_intensity', 'energy intensity'),
-                       ('unemployment_rate', 'unemployment')) AS i (indicator, label)
-    LEFT JOIN #fig f ON f.country_code = c.country_code AND f.year = y.year AND f.indicator = i.indicator
+    FROM #cy cy
+    CROSS JOIN #ind i
+    LEFT JOIN #fig f ON f.country_code = cy.country_code AND f.year = cy.year AND f.indicator = i.indicator
     OUTER APPLY (SELECT TOP (1) x.value, x.year FROM #fig x
-                 WHERE x.country_code = c.country_code AND x.indicator = i.indicator AND x.year < y.year
-                 ORDER BY x.year DESC) p;
+                 WHERE x.country_code = cy.country_code AND x.indicator = i.indicator AND x.year < cy.year
+                 ORDER BY x.year DESC) p
+    LEFT JOIN #cur k ON k.country_code = cy.country_code AND k.year = cy.year AND k.indicator = i.indicator;
 
     SELECT v.country_code, v.year,
            CAST(ROUND(MAX(CASE WHEN v.indicator = 'population'         THEN v.value END), 0) AS BIGINT)        AS population,
@@ -274,18 +313,19 @@ CREATE OR ALTER PROCEDURE dbo.usp_load_dimensions
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @days INT, @zones INT, @profiles INT, @total INT, @details NVARCHAR(MAX), @error NVARCHAR(MAX),
-            @log_id BIGINT;
+    DECLARE @days INT, @zones INT, @profiles INT, @kept INT, @total INT, @details NVARCHAR(MAX),
+            @error NVARCHAR(MAX), @log_id BIGINT;
 
     EXEC dbo.usp_etl_step_start 'LOAD_DIMENSIONS', @log_id OUTPUT;
     BEGIN TRY
         EXEC dbo.usp_load_dim_date @rows_inserted = @days OUTPUT;
         EXEC dbo.usp_load_dim_bidding_zone @new_versions = @zones OUTPUT;
-        EXEC dbo.usp_load_dim_socioeconomic_profile @new_versions = @profiles OUTPUT;
+        EXEC dbo.usp_load_dim_socioeconomic_profile @new_versions = @profiles OUTPUT, @kept_profiles = @kept OUTPUT;
 
         SET @total = @days + @zones + @profiles;
         SET @details = CONCAT('dim_date: +', @days, ' days; dim_bidding_zone: +', @zones,
-                              ' versions; dim_socioeconomic_profile: +', @profiles, ' versions');
+                              ' versions; dim_socioeconomic_profile: +', @profiles, ' versions',
+                              CASE WHEN @kept > 0 THEN CONCAT(' (', @kept, ' country-years not in Eurostat staging kept)') END);
         EXEC dbo.usp_etl_step_end @log_id, 'SUCCESS', @records_processed = @total, @execution_details = @details;
         PRINT @details;
     END TRY
