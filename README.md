@@ -1,7 +1,8 @@
 # ENTSO-E Weather Data Platform
 
 A data warehouse that combines European electricity data, weather and socio-economic indicators for
-**all 27 EU countries**, hour by hour, in SQL Server, as the basis for a Power BI report.
+**all 27 EU countries**, hour by hour, in SQL Server, with a four-page Power BI report on top
+(see [Power BI report](#power-bi-report)).
 
 | Source | What | Grain |
 |---|---|---|
@@ -150,13 +151,42 @@ percent of Ireland's day-ahead forecasts and some months of its load; Spain miss
 | `ssis/` | SSIS project and package `Main_ETL_Process.dtsx` |
 | `tools/check_generated_files.py` | lists generated and local files and where they come from |
 | `docs/` | `ETL_Pipeline.png` and `star_schema.png` (the diagrams above) |
-| `powerbi/` | the Power BI report (not in git, see below) |
+| `powerbi/` | the Power BI report as a project (`.pbip`: semantic model and pages) and its theme |
 
-## Power BI
+## Power BI report
 
-The report (`powerbi/EnergyWeatherReport.pbix`, ~400 MB in import mode) is not in git because it exceeds
-GitHub's 100 MB file limit. It was built on the earlier single-fact schema (`fact_energy_weather`) and is
-being rebuilt on the current model.
+`powerbi/Data-Warehouse-Energy-Weather-Report.pbip` is a Power BI project: the semantic model is stored as
+TMDL and the pages as JSON (PBIR), so the report is versioned as text. It imports the facts and dimensions
+of `EnergyWeatherDW`; the data itself is not in git.
+
+| Page | Shows |
+|---|---|
+| Overview | key figures; renewable share by country on a map (20 % classes); monthly generation by source with demand; generation mix by year |
+| Load & forecast | monthly day-ahead forecast error or bias (switch), forecast error by country, average demand by weekday and hour (UTC), demand on weekends and public holidays compared with working days |
+| Generation mix | average generation by hour of day and source, the ten largest production types, renewable share per month, generation mix per country |
+| Weather & socio-economics | daily demand against temperature by season, heating and cooling degree days per country, demand per person against GDP per person, a socio-economic profile per country |
+
+All pages share the Year and Country slicers. Chart titles state the main finding for the current
+selection (e.g. "Demand peaked in Jan 24 at 242.5 TWh") and change with the slicers. Bulgaria and Malta are
+excluded by a report-level filter because ENTSO-E has no data for them.
+
+How the figures are calculated:
+
+- Energy is summed; temperature, humidity, wind and other weather values are averaged; shares and ratios are
+  calculated from sums (e.g. renewable share = renewable generation / all generation).
+- Forecast error = Σ|forecast − actual| / Σ actual and bias = Σ(forecast − actual) / Σ actual, over hours
+  with both values.
+- Population is averaged over the selected years, never summed. Demand per person only uses country-years
+  with at least 95 % of hours covered by load data, so incomplete data gives no value instead of a too-low
+  one (Cyprus: none; Ireland: 2024 only). GDP per person, electricity price and unemployment are
+  population-weighted for groups of countries.
+- Demand on weekends and public holidays is compared with working days within each bidding zone, because
+  public holidays differ per country.
+
+To open it: Power BI Desktop (tested with version 2.159) → open the `.pbip` → **Home → Refresh**. The model
+connects to `localhost`, database `EnergyWeatherDW`, with Windows authentication; the first refresh loads
+the 7.9 million fact rows and takes a few minutes. The colours come from `powerbi/theme/EnergyWeatherTheme.json`,
+which is already registered in the report.
 
 ## Data sources and terms
 
