@@ -326,7 +326,13 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_dim_socioeconomic_pro
 GO
 
 -- =====================================================================================
--- ETL LOG (unchanged until step 2.3)
+-- ETL LOG (step 2.3): one table for the package run and every step in it
+--   process_name 'ETL_RUN' = one SSIS package run; the steps of that run point to it with run_id
+--   (run_id is NULL when a script is started by hand outside the package).
+--   status: RUNNING -> SUCCESS | FAILED; rows left RUNNING by a crashed run become ABANDONED
+--   at the start of the next run. Times are local server time.
+--   Steps:  usp_etl_step_start / usp_etl_step_end  (Python helper etl/etl_log.py, load procedures)
+--   Run:    usp_etl_run_start / usp_etl_run_end    (SSIS tasks "Start Run" / "Finish Run", OnError handler)
 -- =====================================================================================
 
 IF OBJECT_ID(N'dbo.etl_log', N'U') IS NULL
@@ -335,34 +341,109 @@ CREATE TABLE dbo.etl_log (
     process_name      NVARCHAR(100) NOT NULL,
     start_time        DATETIME2     NOT NULL,
     end_time          DATETIME2,
-    status            NVARCHAR(20)  NOT NULL,   -- 'RUNNING', 'SUCCESS', 'FAILED'
+    status            NVARCHAR(20)  NOT NULL,
     records_processed INT DEFAULT 0,
     error_message     NVARCHAR(MAX),
-    execution_details NVARCHAR(MAX)
+    execution_details NVARCHAR(MAX),
+    run_id            BIGINT NULL
 );
 GO
 
-CREATE OR ALTER PROCEDURE dbo.sp_log_etl_process
-    @process_name      NVARCHAR(100),
-    @status            NVARCHAR(20),
-    @records_processed INT = 0,
-    @error_message     NVARCHAR(MAX) = NULL,
-    @execution_details NVARCHAR(MAX) = NULL
+IF COL_LENGTH(N'dbo.etl_log', N'run_id') IS NULL
+    ALTER TABLE dbo.etl_log ADD run_id BIGINT NULL;
+GO
+
+DROP PROCEDURE IF EXISTS dbo.sp_log_etl_process;   -- replaced by the procedures below
+GO
+
+-- Start of one step; returns its log_id. Linked to the package run in progress, if any.
+CREATE OR ALTER PROCEDURE dbo.usp_etl_step_start
+    @process_name NVARCHAR(100),
+    @log_id       BIGINT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
-    IF @status = 'RUNNING'
-        INSERT INTO dbo.etl_log (process_name, start_time, status, records_processed, error_message, execution_details)
-        VALUES (@process_name, GETDATE(), @status, @records_processed, @error_message, @execution_details);
-    ELSE
-        UPDATE dbo.etl_log
-        SET end_time = GETDATE(),
-            status = @status,
-            records_processed = @records_processed,
-            error_message = @error_message,
-            execution_details = @execution_details
-        WHERE log_id = (SELECT MAX(log_id) FROM dbo.etl_log
-                        WHERE process_name = @process_name AND status = 'RUNNING');
+    DECLARE @run_id BIGINT = (SELECT MAX(log_id) FROM dbo.etl_log
+                              WHERE process_name = 'ETL_RUN' AND status = 'RUNNING');
+    INSERT INTO dbo.etl_log (process_name, start_time, status, records_processed, run_id)
+    VALUES (@process_name, SYSDATETIME(), 'RUNNING', 0, @run_id);
+    SET @log_id = SCOPE_IDENTITY();
+END;
+GO
+
+-- End of one step ('SUCCESS' or 'FAILED'); only a row that is still RUNNING is changed.
+CREATE OR ALTER PROCEDURE dbo.usp_etl_step_end
+    @log_id            BIGINT,
+    @status            NVARCHAR(20),
+    @records_processed INT = 0,
+    @execution_details NVARCHAR(MAX) = NULL,
+    @error_message     NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.etl_log
+    SET end_time = SYSDATETIME(), status = @status, records_processed = ISNULL(@records_processed, 0),
+        execution_details = @execution_details, error_message = @error_message
+    WHERE log_id = @log_id AND status = 'RUNNING';
+END;
+GO
+
+-- SSIS task "Start Run": stops if another run is in progress (started less than 2 hours ago),
+-- closes rows left RUNNING by crashed runs as ABANDONED, and returns the new run's log_id.
+CREATE OR ALTER PROCEDURE dbo.usp_etl_run_start
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (SELECT 1 FROM dbo.etl_log
+               WHERE process_name = 'ETL_RUN' AND status = 'RUNNING'
+                 AND start_time > DATEADD(HOUR, -2, SYSDATETIME()))
+        THROW 50001, 'Another ETL run is in progress (ETL_RUN row with status RUNNING, started less than 2 hours ago). If it crashed, close it with: EXEC dbo.usp_etl_run_end <log_id>, ''ABANDONED''', 1;
+
+    UPDATE dbo.etl_log
+    SET end_time = SYSDATETIME(), status = 'ABANDONED',
+        error_message = 'Not finished (process stopped); closed at the start of the next run'
+    WHERE status = 'RUNNING';
+
+    DECLARE @log_id BIGINT;
+    INSERT INTO dbo.etl_log (process_name, start_time, status, records_processed)
+    VALUES ('ETL_RUN', SYSDATETIME(), 'RUNNING', 0);
+    SET @log_id = SCOPE_IDENTITY();
+    UPDATE dbo.etl_log SET run_id = @log_id WHERE log_id = @log_id;
+
+    SELECT CAST(@log_id AS INT) AS run_id;   -- INT for the SSIS variable User::RunId
+END;
+GO
+
+-- SSIS task "Finish Run" ('SUCCESS') and the package OnError handler ('FAILED').
+-- Summarises the steps of the run (records_processed = number of steps, execution_details = their
+-- status); steps still RUNNING are closed with the same status.
+-- Does nothing when the run is no longer RUNNING (OnError can fire several times) or @run_id = 0.
+CREATE OR ALTER PROCEDURE dbo.usp_etl_run_end
+    @run_id BIGINT,
+    @status NVARCHAR(20)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.etl_log WHERE log_id = @run_id AND process_name = 'ETL_RUN' AND status = 'RUNNING')
+        RETURN;
+
+    UPDATE dbo.etl_log
+    SET end_time = SYSDATETIME(), status = @status,
+        error_message = 'Still running when the package run ended'
+    WHERE run_id = @run_id AND log_id <> @run_id AND status = 'RUNNING';
+
+    DECLARE @details NVARCHAR(MAX), @failed NVARCHAR(MAX);
+    SELECT @details = STRING_AGG(CONCAT(process_name, ' ', status), '; ') WITHIN GROUP (ORDER BY log_id),
+           @failed  = STRING_AGG(CASE WHEN status <> 'SUCCESS' THEN process_name END, ', ')
+    FROM dbo.etl_log
+    WHERE run_id = @run_id AND log_id <> @run_id;
+
+    UPDATE dbo.etl_log
+    SET end_time = SYSDATETIME(), status = @status,
+        records_processed = (SELECT COUNT(*) FROM dbo.etl_log WHERE run_id = @run_id AND log_id <> @run_id),
+        execution_details = @details,
+        error_message = CASE WHEN @status <> 'SUCCESS' THEN CONCAT('Failed or unfinished steps: ', ISNULL(@failed, 'none (failed before the first step)')) END
+    WHERE log_id = @run_id;
 END;
 GO
 

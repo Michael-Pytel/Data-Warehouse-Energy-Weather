@@ -272,23 +272,25 @@ CREATE OR ALTER PROCEDURE dbo.usp_load_dimensions
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @days INT, @zones INT, @profiles INT, @details NVARCHAR(MAX), @error NVARCHAR(MAX);
+    DECLARE @days INT, @zones INT, @profiles INT, @total INT, @details NVARCHAR(MAX), @error NVARCHAR(MAX),
+            @log_id BIGINT;
 
-    EXEC dbo.sp_log_etl_process 'LOAD_DIMENSIONS', 'RUNNING';
+    EXEC dbo.usp_etl_step_start 'LOAD_DIMENSIONS', @log_id OUTPUT;
     BEGIN TRY
         EXEC dbo.usp_load_dim_date @rows_inserted = @days OUTPUT;
         EXEC dbo.usp_load_dim_bidding_zone @new_versions = @zones OUTPUT;
         EXEC dbo.usp_load_dim_socioeconomic_profile @new_versions = @profiles OUTPUT;
 
+        SET @total = @days + @zones + @profiles;
         SET @details = CONCAT('dim_date: +', @days, ' days; dim_bidding_zone: +', @zones,
                               ' versions; dim_socioeconomic_profile: +', @profiles, ' versions');
-        EXEC dbo.sp_log_etl_process 'LOAD_DIMENSIONS', 'SUCCESS', @records_processed = @days, @execution_details = @details;
+        EXEC dbo.usp_etl_step_end @log_id, 'SUCCESS', @records_processed = @total, @execution_details = @details;
         PRINT @details;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         SET @error = ERROR_MESSAGE();
-        EXEC dbo.sp_log_etl_process 'LOAD_DIMENSIONS', 'FAILED', @error_message = @error;
+        EXEC dbo.usp_etl_step_end @log_id, 'FAILED', @error_message = @error;
         THROW;
     END CATCH;
 END;
@@ -461,22 +463,22 @@ AS
 BEGIN
     SET NOCOUNT ON;
     DECLARE @load INT, @gen INT, @load_details NVARCHAR(1000), @gen_details NVARCHAR(1000),
-            @details NVARCHAR(MAX), @total INT, @error NVARCHAR(MAX);
+            @details NVARCHAR(MAX), @total INT, @error NVARCHAR(MAX), @log_id BIGINT;
 
-    EXEC dbo.sp_log_etl_process 'LOAD_FACTS', 'RUNNING';
+    EXEC dbo.usp_etl_step_start 'LOAD_FACTS', @log_id OUTPUT;
     BEGIN TRY
         EXEC dbo.usp_load_fact_load       @rows_inserted = @load OUTPUT, @details = @load_details OUTPUT;
         EXEC dbo.usp_load_fact_generation @rows_inserted = @gen  OUTPUT, @details = @gen_details  OUTPUT;
 
         SET @total = @load + @gen;
         SET @details = CONCAT(@load_details, ' | ', @gen_details);
-        EXEC dbo.sp_log_etl_process 'LOAD_FACTS', 'SUCCESS', @records_processed = @total, @execution_details = @details;
+        EXEC dbo.usp_etl_step_end @log_id, 'SUCCESS', @records_processed = @total, @execution_details = @details;
         PRINT @details;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
         SET @error = ERROR_MESSAGE();
-        EXEC dbo.sp_log_etl_process 'LOAD_FACTS', 'FAILED', @error_message = @error;
+        EXEC dbo.usp_etl_step_end @log_id, 'FAILED', @error_message = @error;
         THROW;
     END CATCH;
 END;
