@@ -132,81 +132,6 @@ class EurostatClient:
                 'alternative_units': ['THS_PER'],
                 'alternative_age_params': ['Y_GE15', 'Y15-64']  # Fallback age parameters
             },
-            # ZAKTUALIZOWANO: Zmieniono nazwę i kod datasetu zgodnie z wymogami
-            'poverty_by_degree_of_urbanization': {
-                'code': 'ilc_sbjp05',
-                'description': 'Subjective poverty by degree of urbanization',
-                'params': {
-                    # Bez parametrów - najlepsze wyniki (90 niepustych wartości)
-                },
-                'alternative_params': [
-                    {
-                        'unit': 'PC'  # Również daje 90 niepustych wartości
-                    }
-                ]
-            },
-            'service_sector': {
-                'code': 'sts_sepr_a',  # ZMIENIONO: parametr indic_bt nie jest potrzebny
-                'description': 'Production in services - annual data',
-                'params': {
-                    's_adj': 'CA',       # Calendar adjusted data - tylko ten parametr działa
-                    'nace_r2': 'G-N_X_K'  # Services excluding financial services
-                }
-            },
-            
-            'industry_sector': {
-                'code': 'sts_inpr_a',  # ZMIENIONO: parametr indic_bt nie jest potrzebny
-                'description': 'Production in industry - annual data',
-                'params': {
-                    's_adj': 'CA',     # Calendar adjusted data - tylko ten parametr działa
-                    'nace_r2': 'B-D'  # Industry excluding construction
-                }
-            },
-            
-            'household_size': {
-                'code': 'lfst_hhantych',  # ZMIENIONO: parametr hhtyp nie jest obsługiwany
-                'description': 'Average number of persons per household by household composition',
-                'params': {
-                    # Bez parametrów - testy pokazały że działa tylko bez parametrów
-                }
-            },
-            'energy_poverty': {
-                'code': 'sdg_07_60',  # Ten działa poprawnie
-                'description': 'Population unable to keep home adequately warm by poverty status',
-                'params': {
-                    'unit': 'PC',     # Percentage
-                    'incgrp': 'TOTAL'  # Total population
-                }
-            },
-            'heating_systems': {
-                'code': 'nrg_pc_202',  # Dataset z najlepszymi wynikami (2664 rekordów)
-                'description': 'Primary heating systems and gas prices',
-                'params': {
-                    # Bez parametrów - najlepsze wyniki
-                },
-                'fallback_dataset': [
-                    {
-                        'code': 'nrg_d_hhq',
-                        'params': {
-                            # Bez parametrów - 2220 rekordów
-                        }
-                    },
-                    {
-                        'code': 'nrg_d_hhq',
-                        'params': {
-                            'nrg_bal': 'FC_OTH_HH_E'  # 420 rekordów
-                        }
-                    },
-                    {
-                        'code': 'nrg_bal_c',
-                        'params': {
-                            'unit': 'TJ',
-                            'siec': 'TOTAL',
-                            'nrg_bal': 'FC_OTH_HH_E'  # 20 rekordów
-                        }
-                    }
-                ]
-            }
         }
     
     def _make_request(self, dataset_code: str, params: Dict, max_retries: int = 3) -> Optional[Dict]:
@@ -863,15 +788,9 @@ class EurostatClient:
         raw_data['electricity_prices'] = self.get_electricity_prices_data(countries, since_year)
         raw_data['energy_intensity'] = self.get_energy_intensity_data(countries, since_year)
         raw_data['unemployment_rate'] = self.get_unemployment_data(countries, since_year)
-        
-        # Dodatkowe dane dla lepszych profili socjoekonomicznych
-        raw_data['poverty_by_degree_of_urbanization'] = self.get_poverty_by_urbanization_data(countries, since_year)
-        raw_data['service_sector'] = self.get_service_sector_data(countries, since_year)
-        raw_data['industry_sector'] = self.get_industry_sector_data(countries, since_year)
-        raw_data['household_size'] = self.get_household_size_data(countries, since_year)
-        raw_data['energy_poverty'] = self.get_energy_poverty_data(countries, since_year)
-        raw_data['heating_systems'] = self.get_heating_systems_data(countries, since_year)
-        
+        # The other indicators were dropped (decision H1: their queries returned values on the
+        # wrong country/year); see "Future work" in docs/PLAN.md.
+
         return raw_data
     
     def prepare_integrated_socioeconomic_data(self, raw_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -1136,125 +1055,35 @@ class EurostatClient:
             self.logger.error(f"Error exporting to CSV: {str(e)}")
             return False
     
-    def save_to_staging(self, raw_data: Dict[str, pd.DataFrame], integrated_data: pd.DataFrame) -> bool:
-        """Zapis danych do tabel staging w bazie danych - z usuwaniem i ponownym tworzeniem tabel"""
-        
+    def save_to_staging(self, raw_data: Dict[str, pd.DataFrame]) -> bool:
+        """Replace the contents of staging_eurostat_raw (table defined in database/create_warehouse.sql)."""
+
         if not self.connection_string:
             self.logger.warning("No connection string provided - skipping database save")
             return True
-        
+
+        rows = []
+        for dataset_name, df in raw_data.items():
+            for r in df.itertuples(index=False):
+                value = None if pd.isna(r.value) else float(r.value)  # NaN -> NULL
+                rows.append((dataset_name, r.country_code, r.country_name, r.time_period, value))
+
         try:
             with pyodbc.connect(self.connection_string) as conn:
                 cursor = conn.cursor()
-                
-                # Usuń istniejące tabele
-                self.logger.info("Dropping existing staging tables")
-                cursor.execute("IF OBJECT_ID('staging_eurostat_raw', 'U') IS NOT NULL DROP TABLE staging_eurostat_raw")
-                cursor.execute("IF OBJECT_ID('staging_eurostat_integrated', 'U') IS NOT NULL DROP TABLE staging_eurostat_integrated")
-                
-                # Utwórz tabele na nowo
-                self.logger.info("Creating new staging tables")
-                # Tabela staging dla surowych danych
-                cursor.execute("""
-                    CREATE TABLE staging_eurostat_raw (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        dataset_name NVARCHAR(100),
-                        country_code NVARCHAR(10),
-                        country_name NVARCHAR(100),
-                        time_period NVARCHAR(20),
-                        value FLOAT,
-                        extraction_date DATETIME DEFAULT GETDATE()
-                    )
-                """)
-                
-                # Tabela staging dla zintegrowanych danych
-                cursor.execute("""
-                    CREATE TABLE staging_eurostat_integrated (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        country_code NVARCHAR(10),
-                        country_name NVARCHAR(100),
-                        year INT,
-                        population FLOAT,
-                        gdp_per_capita FLOAT,
-                        electricity_price_avg FLOAT,
-                        energy_intensity FLOAT,
-                        unemployment_rate FLOAT,
-                        poverty_by_degree_of_urbanization FLOAT,
-                        service_sector_percentage FLOAT,
-                        industry_sector_percentage FLOAT,
-                        avg_household_size FLOAT,
-                        energy_poverty_rate FLOAT,
-                        primary_heating_type NVARCHAR(50),
-                        data_quality_score INT,
-                        extraction_date DATETIME DEFAULT GETDATE()
-                    )
-                """)
-                
-                # Wstaw surowe dane
-                raw_insert_count = 0
-                for dataset_name, df in raw_data.items():
-                    if not df.empty:
-                        for _, row in df.iterrows():
-                            # iterrows turns None into NaN, which SQL Server rejects as a float
-                            value = None if pd.isna(row['value']) else float(row['value'])
-                            cursor.execute("""
-                                INSERT INTO staging_eurostat_raw
-                                (dataset_name, country_code, country_name, time_period, value)
-                                VALUES (?, ?, ?, ?, ?)
-                            """, dataset_name, row['country_code'], row['country_name'],
-                               row['time_period'], value)
-                            raw_insert_count += 1
-                
-                # Wstaw zintegrowane dane
-                integrated_insert_count = 0
-                if not integrated_data.empty:
-                    for _, row in integrated_data.iterrows():
-                        # Upewnij się, że wartości są odpowiedniego typu lub NULL
-                        population = float(row['population']) if pd.notna(row['population']) else None
-                        gdp_per_capita = float(row['gdp_per_capita']) if pd.notna(row['gdp_per_capita']) else None
-                        electricity_price_avg = float(row['electricity_price_avg']) if pd.notna(row['electricity_price_avg']) else None
-                        energy_intensity = float(row['energy_intensity']) if pd.notna(row['energy_intensity']) else None
-                        unemployment_rate = float(row['unemployment_rate']) if pd.notna(row['unemployment_rate']) else None
-                        poverty_by_degree_of_urbanization = float(row['poverty_by_degree_of_urbanization']) if pd.notna(row['poverty_by_degree_of_urbanization']) else None
-                        service_sector_percentage = float(row['service_sector_percentage']) if pd.notna(row['service_sector_percentage']) else None
-                        industry_sector_percentage = float(row['industry_sector_percentage']) if pd.notna(row['industry_sector_percentage']) else None
-                        avg_household_size = float(row['avg_household_size']) if pd.notna(row['avg_household_size']) else None
-                        energy_poverty_rate = float(row['energy_poverty_rate']) if pd.notna(row['energy_poverty_rate']) else None
-                        
-                        # Dodajmy debugowanie, aby zobaczyć, co dokładnie powoduje problem
-                        self.logger.debug(f"Row data types: primary_heating_type={type(row['primary_heating_type'])}, value={row['primary_heating_type']}")
-                        
-                        cursor.execute("""
-                            INSERT INTO staging_eurostat_integrated 
-                            (country_code, country_name, year, population, gdp_per_capita, 
-                            electricity_price_avg, energy_intensity, unemployment_rate, 
-                            poverty_by_degree_of_urbanization, service_sector_percentage, 
-                            industry_sector_percentage, avg_household_size, energy_poverty_rate, 
-                            primary_heating_type, data_quality_score)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, 
-                        row['country_code'], 
-                        row['country_name'], 
-                        int(row['year']), 
-                        population, 
-                        gdp_per_capita,
-                        electricity_price_avg, 
-                        energy_intensity, 
-                        unemployment_rate, 
-                        poverty_by_degree_of_urbanization, 
-                        service_sector_percentage,
-                        industry_sector_percentage, 
-                        avg_household_size, 
-                        energy_poverty_rate, 
-                        None if pd.isna(row['primary_heating_type']) else row['primary_heating_type'],
-                        int(row['data_quality_score']))
-                        integrated_insert_count += 1
-                
+                if cursor.execute("SELECT OBJECT_ID('dbo.staging_eurostat_raw', 'U')").fetchone()[0] is None:
+                    raise RuntimeError("staging_eurostat_raw does not exist - run database/create_warehouse.sql first")
+                cursor.execute("TRUNCATE TABLE dbo.staging_eurostat_raw")
+                if rows:
+                    cursor.fast_executemany = True
+                    cursor.executemany(
+                        "INSERT INTO dbo.staging_eurostat_raw (dataset_name, country_code, country_name, time_period, value) "
+                        "VALUES (?, ?, ?, ?, ?)", rows)
                 conn.commit()
-                
-                self.logger.info(f"Successfully saved {raw_insert_count} raw records and {integrated_insert_count} integrated records to staging tables")
+
+                self.logger.info(f"Successfully saved {len(rows)} raw records to staging_eurostat_raw")
                 return True
-                
+
         except Exception as e:
             self.logger.error(f"Error saving to database: {str(e)}")
             traceback.print_exc()
@@ -1394,7 +1223,7 @@ def main():
         db_success = True
         if connection_string:
             logger.info("Saving data to staging tables...")
-            db_success = client.save_to_staging(raw_data, integrated_data)
+            db_success = client.save_to_staging(raw_data)
         else:
             logger.warning("No database connection string provided - skipping database save")
         
