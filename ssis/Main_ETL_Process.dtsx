@@ -1,4 +1,4 @@
-<?xml version="1.0"?>
+﻿<?xml version="1.0"?>
 <DTS:Executable xmlns:DTS="www.microsoft.com/SqlServer/Dts"
   DTS:refId="Package"
   DTS:CreationDate="6/4/2025 10:34:50 AM"
@@ -11,8 +11,8 @@
   DTS:LocaleID="1045"
   DTS:ObjectName="Main_ETL_Process"
   DTS:PackageType="5"
-  DTS:VersionBuild="53"
-  DTS:VersionGUID="{9B7810D1-7451-4B9D-9084-6E24D8B6E847}">
+  DTS:VersionBuild="54"
+  DTS:VersionGUID="{E3697894-09E8-45B6-89E1-CB542B253E09}">
   <DTS:Property
     DTS:Name="PackageFormatVersion">8</DTS:Property>
   <DTS:Variables>
@@ -41,7 +41,7 @@
       DTS:Namespace="User"
       DTS:ObjectName="EndDate">
       <DTS:VariableValue
-        DTS:DataType="8">2024-01-02</DTS:VariableValue>
+        DTS:DataType="8">2026-01-01</DTS:VariableValue>
     </DTS:Variable>
     <DTS:Variable
       DTS:CreationName=""
@@ -86,30 +86,143 @@
       DTS:Namespace="User"
       DTS:ObjectName="StartDate">
       <DTS:VariableValue
-        DTS:DataType="8">2023-12-30</DTS:VariableValue>
+        DTS:DataType="8">2023-01-01</DTS:VariableValue>
     </DTS:Variable>
   </DTS:Variables>
   <DTS:Executables>
     <DTS:Executable
-      DTS:refId="Package\Start Run"
+      DTS:refId="Package\Execute Eurostat Data"
+      DTS:CreationName="Microsoft.ExecuteProcess"
+      DTS:Description="Execute Process Task"
+      DTS:DTSID="{BB13F719-8852-4ACD-A1DB-D82977DB69A4}"
+      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Execute Eurostat Data"
+      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:PropertyExpression
+        DTS:Name="Arguments">"eurostat_client.py " +@[User::SinceYear]+" \""+ @[User::Countries]+"\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
+      <DTS:ObjectData>
+        <ExecuteProcessData
+          Executable="python.exe"
+          Arguments="eurostat_client.py 2020 &quot;AT,BE,BG,CY,CZ,DE,DK,EE,ES,FI,FR,GR,HR,HU,IE,IT,LT,LU,LV,MT,NL,PL,PT,RO,SE,SI,SK&quot;"
+          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Execute Weather Data"
+      DTS:CreationName="Microsoft.ExecuteProcess"
+      DTS:Description="Execute Process Task"
+      DTS:DTSID="{7F887F4A-45DA-4316-84E7-D34D04822F69}"
+      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Execute Weather Data"
+      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:PropertyExpression
+        DTS:Name="Arguments">"open_meteo_client.py" +" \"" + @[User::StartDate]+"\"" +" \"" + @[User::EndDate]+"\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
+      <DTS:ObjectData>
+        <ExecuteProcessData
+          Executable="python.exe"
+          Arguments="open_meteo_client.py &quot;2023-01-01&quot; &quot;2026-01-01&quot;"
+          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Extract Enstoe Data"
+      DTS:CreationName="Microsoft.ExecuteProcess"
+      DTS:Description="Execute Process Task"
+      DTS:DTSID="{0A0DC20F-5DC4-486B-B6EB-56DDE9DB0D71}"
+      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Extract Enstoe Data"
+      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:PropertyExpression
+        DTS:Name="Arguments">"entsoe_client.py" + " --connection \"" + @[User::ConnectionString] + "\"" + " --start \"" + @[User::StartDate] + "\"" + " --end \"" + @[User::EndDate] + "\""</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
+      <DTS:ObjectData>
+        <ExecuteProcessData
+          Executable="python.exe"
+          Arguments="entsoe_client.py --connection &quot;Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;&quot; --start &quot;2023-01-01&quot; --end &quot;2026-01-01&quot;"
+          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Finish Run"
       DTS:CreationName="Microsoft.ExecuteSQLTask"
       DTS:Description="Execute SQL Task"
-      DTS:DTSID="{D0684100-9B88-4F81-8E71-63FF1CF9504F}"
+      DTS:DTSID="{5E3B1C2A-7D4F-4A8E-9B61-2C0F3E8D4A17}"
       DTS:ExecutableType="Microsoft.ExecuteSQLTask"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Start Run"
+      DTS:ObjectName="Finish Run"
       DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:ObjectData>
         <SQLTask:SqlTaskData
           SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
-          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_start;"
-          SQLTask:ResultType="ResultSetType_SingleRow" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
-          <SQLTask:ResultBinding
-            SQLTask:ResultName="0"
-            SQLTask:DtsVariableName="User::RunId" />
+          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_end ?, 'SUCCESS';" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
+          <SQLTask:ParameterBinding
+            SQLTask:ParameterName="0"
+            SQLTask:DtsVariableName="User::RunId"
+            SQLTask:ParameterDirection="Input"
+            SQLTask:DataType="3"
+            SQLTask:ParameterSize="-1" />
         </SQLTask:SqlTaskData>
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Key Check"
+      DTS:CreationName="Microsoft.ExecuteProcess"
+      DTS:Description="Execute Process Task"
+      DTS:DTSID="{8A0D8C41-8693-4126-98B5-99491344FD91}"
+      DTS:ExecutableType="Microsoft.ExecuteProcess"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Key Check"
+      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:PropertyExpression
+        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
+      <DTS:PropertyExpression
+        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
+      <DTS:ObjectData>
+        <ExecuteProcessData
+          Executable="python.exe"
+          Arguments="fix_null_values.py"
+          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
+      </DTS:ObjectData>
+    </DTS:Executable>
+    <DTS:Executable
+      DTS:refId="Package\Load Dimensions"
+      DTS:CreationName="Microsoft.ExecuteSQLTask"
+      DTS:Description="Execute SQL Task"
+      DTS:DTSID="{9858AB04-BC0C-423E-8527-DB70F6EBBF48}"
+      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
+      DTS:LocaleID="-1"
+      DTS:ObjectName="Load Dimensions"
+      DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
+      DTS:ThreadHint="0">
+      <DTS:Variables />
+      <DTS:ObjectData>
+        <SQLTask:SqlTaskData
+          SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
+          SQLTask:SqlStatementSource="EXEC dbo.usp_load_dimensions;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
@@ -149,142 +262,29 @@
       <DTS:ObjectData>
         <ExecuteProcessData
           Executable="python.exe"
-          Arguments="reference_loader.py &quot;2023-12-30&quot; &quot;2024-01-02&quot;"
+          Arguments="reference_loader.py &quot;2023-01-01&quot; &quot;2026-01-01&quot;"
           WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
       </DTS:ObjectData>
     </DTS:Executable>
     <DTS:Executable
-      DTS:refId="Package\Execute Eurostat Data"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
-      DTS:DTSID="{BB13F719-8852-4ACD-A1DB-D82977DB69A4}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
-      DTS:LocaleID="-1"
-      DTS:ObjectName="Execute Eurostat Data"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-      DTS:ThreadHint="0">
-      <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"eurostat_client.py " +@[User::SinceYear]+" \""+ @[User::Countries]+"\""</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="eurostat_client.py 2020 &quot;AT,BE,BG,CY,CZ,DE,DK,EE,ES,FI,FR,GR,HR,HU,IE,IT,LT,LU,LV,MT,NL,PL,PT,RO,SE,SI,SK&quot;"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
-      </DTS:ObjectData>
-    </DTS:Executable>
-    <DTS:Executable
-      DTS:refId="Package\Load Dimensions"
+      DTS:refId="Package\Start Run"
       DTS:CreationName="Microsoft.ExecuteSQLTask"
       DTS:Description="Execute SQL Task"
-      DTS:DTSID="{9858AB04-BC0C-423E-8527-DB70F6EBBF48}"
+      DTS:DTSID="{D0684100-9B88-4F81-8E71-63FF1CF9504F}"
       DTS:ExecutableType="Microsoft.ExecuteSQLTask"
       DTS:LocaleID="-1"
-      DTS:ObjectName="Load Dimensions"
+      DTS:ObjectName="Start Run"
       DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
       DTS:ThreadHint="0">
       <DTS:Variables />
       <DTS:ObjectData>
         <SQLTask:SqlTaskData
           SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
-          SQLTask:SqlStatementSource="EXEC dbo.usp_load_dimensions;" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask" />
-      </DTS:ObjectData>
-    </DTS:Executable>
-    <DTS:Executable
-      DTS:refId="Package\Key Check"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
-      DTS:DTSID="{8A0D8C41-8693-4126-98B5-99491344FD91}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
-      DTS:LocaleID="-1"
-      DTS:ObjectName="Key Check"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-      DTS:ThreadHint="0">
-      <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="fix_null_values.py"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
-      </DTS:ObjectData>
-    </DTS:Executable>
-    <DTS:Executable
-      DTS:refId="Package\Execute Weather Data"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
-      DTS:DTSID="{7F887F4A-45DA-4316-84E7-D34D04822F69}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
-      DTS:LocaleID="-1"
-      DTS:ObjectName="Execute Weather Data"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-      DTS:ThreadHint="0">
-      <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"open_meteo_client.py" +" \"" + @[User::StartDate]+"\"" +" \"" + @[User::EndDate]+"\""</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="open_meteo_client.py &quot;2023-12-30&quot; &quot;2024-01-02&quot;"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
-      </DTS:ObjectData>
-    </DTS:Executable>
-    <DTS:Executable
-      DTS:refId="Package\Extract Enstoe Data"
-      DTS:CreationName="Microsoft.ExecuteProcess"
-      DTS:Description="Execute Process Task"
-      DTS:DTSID="{0A0DC20F-5DC4-486B-B6EB-56DDE9DB0D71}"
-      DTS:ExecutableType="Microsoft.ExecuteProcess"
-      DTS:LocaleID="-1"
-      DTS:ObjectName="Extract Enstoe Data"
-      DTS:TaskContact="Execute Process Task;Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-      DTS:ThreadHint="0">
-      <DTS:Variables />
-      <DTS:PropertyExpression
-        DTS:Name="Arguments">"entsoe_client.py" + " --connection \"" + @[User::ConnectionString] + "\"" + " --start \"" + @[User::StartDate] + "\"" + " --end \"" + @[User::EndDate] + "\""</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="Executable">@[User::PythonPath]</DTS:PropertyExpression>
-      <DTS:PropertyExpression
-        DTS:Name="WorkingDirectory">@[User::ScriptsFolder]</DTS:PropertyExpression>
-      <DTS:ObjectData>
-        <ExecuteProcessData
-          Executable="python.exe"
-          Arguments="entsoe_client.py --connection &quot;Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=EnergyWeatherDW;Trusted_Connection=yes;TrustServerCertificate=yes;&quot; --start &quot;2023-12-30&quot; --end &quot;2024-01-02&quot;"
-          WorkingDirectory="C:\Users\asus\Documents\ENTSO-E-Weather-Data-Platform\etl" />
-      </DTS:ObjectData>
-    </DTS:Executable>
-    <DTS:Executable
-      DTS:refId="Package\Finish Run"
-      DTS:CreationName="Microsoft.ExecuteSQLTask"
-      DTS:Description="Execute SQL Task"
-      DTS:DTSID="{5E3B1C2A-7D4F-4A8E-9B61-2C0F3E8D4A17}"
-      DTS:ExecutableType="Microsoft.ExecuteSQLTask"
-      DTS:LocaleID="-1"
-      DTS:ObjectName="Finish Run"
-      DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-      DTS:ThreadHint="0">
-      <DTS:Variables />
-      <DTS:ObjectData>
-        <SQLTask:SqlTaskData
-          SQLTask:Connection="{AA7E84A8-E9A3-4EB5-9AB7-65AA9F4430BE}"
-          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_end ?, 'SUCCESS';" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
-          <SQLTask:ParameterBinding
-            SQLTask:ParameterName="0"
-            SQLTask:DtsVariableName="User::RunId"
-            SQLTask:ParameterDirection="Input"
-            SQLTask:DataType="3"
-            SQLTask:ParameterSize="-1" />
+          SQLTask:SqlStatementSource="EXEC dbo.usp_etl_run_start;"
+          SQLTask:ResultType="ResultSetType_SingleRow" xmlns:SQLTask="www.microsoft.com/sqlserver/dts/tasks/sqltask">
+          <SQLTask:ResultBinding
+            SQLTask:ResultName="0"
+            SQLTask:DtsVariableName="User::RunId" />
         </SQLTask:SqlTaskData>
       </DTS:ObjectData>
     </DTS:Executable>
@@ -384,8 +384,7 @@
           DTS:ExecutableType="Microsoft.ExecuteSQLTask"
           DTS:LocaleID="-1"
           DTS:ObjectName="Fail Run"
-          DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1"
-          DTS:ThreadHint="0">
+          DTS:TaskContact="Execute SQL Task; Microsoft Corporation; SQL Server 2022; © 2022 Microsoft Corporation; All Rights Reserved;http://www.microsoft.com/sql/support/default.asp;1">
           <DTS:Variables />
           <DTS:ObjectData>
             <SQLTask:SqlTaskData
@@ -414,31 +413,43 @@
     design-time-name="Package">
     <LayoutInfo>
       <GraphLayout
-        Capacity="16" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph" xmlns:mssgle="clr-namespace:Microsoft.SqlServer.Graph.LayoutEngine;assembly=Microsoft.SqlServer.Graph" xmlns:assembly="http://schemas.microsoft.com/winfx/2006/xaml">
+        Capacity="32" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph" xmlns:mssgle="clr-namespace:Microsoft.SqlServer.Graph.LayoutEngine;assembly=Microsoft.SqlServer.Graph" xmlns:assembly="http://schemas.microsoft.com/winfx/2006/xaml">
         <NodeLayout
-          Size="152,41.6"
-          Id="Package\Start Run"
-          TopLeft="350.000000745058,138.411764584559" />
-        <NodeLayout
-          Size="179.2,41.6"
-          Id="Package\Load Reference Data"
-          TopLeft="323.571429260227,454.105882058682" />
-        <NodeLayout
-          Size="183.2,41.6"
+          Size="183,42"
           Id="Package\Execute Eurostat Data"
           TopLeft="325.00000069184,383.988235005221" />
         <NodeLayout
-          Size="183.2,41.6"
-          Id="Package\Load Dimensions"
-          TopLeft="327.142857839258,530.811764425029" />
-        <NodeLayout
-          Size="184,41.6"
+          Size="184,42"
           Id="Package\Execute Weather Data"
           TopLeft="321.428572112808,309.705882081472" />
         <NodeLayout
-          Size="171.2,41.6"
+          Size="171,42"
           Id="Package\Extract Enstoe Data"
           TopLeft="335.000000713127,233.99999979489" />
+        <NodeLayout
+          Size="152,42"
+          Id="Package\Finish Run"
+          TopLeft="365.000000745058,800" />
+        <NodeLayout
+          Size="203,42"
+          Id="Package\Key Check"
+          TopLeft="339.285715007965,713.305882058682" />
+        <NodeLayout
+          Size="183,42"
+          Id="Package\Load Dimensions"
+          TopLeft="327.142857839258,530.811764425029" />
+        <NodeLayout
+          Size="179,42"
+          Id="Package\Load Facts"
+          TopLeft="312.142857807327,621.364705665177" />
+        <NodeLayout
+          Size="179,42"
+          Id="Package\Load Reference Data"
+          TopLeft="323.571429260227,454.105882058682" />
+        <NodeLayout
+          Size="152,42"
+          Id="Package\Start Run"
+          TopLeft="350.000000745058,138.411764584559" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint]"
           TopLeft="423.300000729093,180.011764584559">
@@ -549,10 +560,6 @@
             <EdgeLabelCollection />
           </EdgeLayout.Labels>
         </EdgeLayout>
-        <NodeLayout
-          Size="179.2,41.6"
-          Id="Package\Load Facts"
-          TopLeft="312.142857807327,621.364705665177" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint 5]"
           TopLeft="418.742857839258,572.411764425029">
@@ -587,10 +594,6 @@
             <EdgeLabelCollection />
           </EdgeLayout.Labels>
         </EdgeLayout>
-        <NodeLayout
-          Size="203.2,41.6"
-          Id="Package\Key Check"
-          TopLeft="339.285715007965,713.305882058682" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint 6]"
           TopLeft="401.742857807327,662.964705665177">
@@ -625,10 +628,6 @@
             <EdgeLabelCollection />
           </EdgeLayout.Labels>
         </EdgeLayout>
-        <NodeLayout
-          Size="152,41.6"
-          Id="Package\Finish Run"
-          TopLeft="365.000000745058,800" />
         <EdgeLayout
           Id="Package.PrecedenceConstraints[Constraint 7]"
           TopLeft="440.885715007965,754.905882058682">
@@ -654,5 +653,17 @@
       </GraphLayout>
     </LayoutInfo>
   </Package>
+  <DtsEventHandler
+    design-time-name="Package.EventHandlers[OnError]">
+    <LayoutInfo>
+      <GraphLayout
+        Capacity="4" xmlns="clr-namespace:Microsoft.SqlServer.IntegrationServices.Designer.Model.Serialization;assembly=Microsoft.SqlServer.IntegrationServices.Graph">
+        <NodeLayout
+          Size="NaN,NaN"
+          Id="Package.EventHandlers[OnError]\Fail Run"
+          TopLeft="NaN,NaN" />
+      </GraphLayout>
+    </LayoutInfo>
+  </DtsEventHandler>
 </Objects>]]></DTS:DesignTimeProperties>
 </DTS:Executable>
