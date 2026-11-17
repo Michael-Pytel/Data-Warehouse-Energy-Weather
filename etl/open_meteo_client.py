@@ -15,12 +15,56 @@ import pyodbc
 import json
 import os
 import sys
+import threading
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from etl_log import EtlStep
 
-# Parallel requests to the archive API (free tier: 600 calls/minute)
-MAX_WORKERS = 8
+# Open-Meteo free tier: 600 calls/minute, 5,000/hour, 10,000/day per IP address. A request counts as several
+# calls when it covers more than 2 weeks or more than 10 variables (weight = days/14 x variables/10, at least 1).
+# Requests are made per city and calendar year and paced below these limits; a full 3-year load
+# (89 cities, ~7,000 weighted calls) therefore takes a little over an hour.
+MAX_WORKERS = 4                          # more parallel requests get "429 Too many concurrent requests"
+LIMITS = {60: 500, 3600: 4500}           # window in seconds -> max weighted calls (margin below 600 / 5,000)
+DAILY_LIMIT = 10000
+REQUEST_TIMEOUT = 120
+MAX_RETRIES = 5
+
+
+class WeightedRateLimiter:
+    """Keep the weighted calls in every window (e.g. 60 s, 3600 s) below its limit (thread-safe)."""
+
+    def __init__(self, limits: Dict[int, float]):
+        self.limits = limits
+        self.calls = deque()                 # (time, weight)
+        self.lock = threading.Lock()
+
+    def wait(self, weight: float, logger=None):
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                longest = max(self.limits)
+                while self.calls and now - self.calls[0][0] >= longest:
+                    self.calls.popleft()
+                delay = 0
+                for window, limit in self.limits.items():
+                    in_window = [(t, w) for t, w in self.calls if now - t < window]
+                    used = sum(w for _, w in in_window)
+                    if used + weight > limit:
+                        # wait until enough of the oldest calls have left this window
+                        for t, w in in_window:
+                            used -= w
+                            if used + weight <= limit:
+                                delay = max(delay, window - (now - t) + 0.5)
+                                break
+                if delay == 0:
+                    self.calls.append((now, weight))
+                    return
+            if logger and delay > 30:
+                logger.info(f"Open-Meteo rate limit: waiting {delay / 60:.1f} min")
+            time.sleep(delay)
+
 
 # WMO weather interpretation codes (Open-Meteo `weather_code`) mapped to the condition types
 # of dim_weather_condition (see database/create_warehouse.sql). Unlisted codes become 'Unknown'.
@@ -285,6 +329,8 @@ class OpenMeteoClient:
             }
         }
         
+        self.rate_limiter = WeightedRateLimiter(LIMITS)
+
         # Open-Meteo hourly variable -> staging column
         self.hourly_params = {
             'temperature_2m': 'temperature_avg',
@@ -298,64 +344,59 @@ class OpenMeteoClient:
             'weather_code': 'weather_code',            # WMO weather interpretation code
         }
     
-    def _make_request(self, url: str, params: Dict, max_retries: int = 3) -> Optional[Dict]:
-        """
-        Wykonanie zapytania do API z retry logic
-        
-        Args:
-            url: URL endpoint
-            params: Parametry zapytania
-            max_retries: Maksymalna liczba prób
-            
-        Returns:
-            Odpowiedź JSON jako dict lub None w przypadku błędu
-        """
-        for attempt in range(max_retries):
+    def request_weight(self, days: int) -> float:
+        """Weighted API calls of one request (Open-Meteo counting, see LIMITS)."""
+        return max(1.0, days / 14) * max(1.0, len(self.hourly_params) / 10)
+
+    def _make_request(self, params: Dict, weight: float) -> Dict:
+        """GET with weighted rate limit and retries; raises RuntimeError when it still fails."""
+        last_error = None
+        for attempt in range(MAX_RETRIES):
+            self.rate_limiter.wait(weight, self.logger)
             try:
-                response = requests.get(url, params=params, timeout=30)
-                
+                response = requests.get(self.base_url, params=params, timeout=REQUEST_TIMEOUT)
                 if response.status_code == 200:
                     return response.json()
-                elif response.status_code == 429:  # Too Many Requests
-                    wait_time = 2 ** attempt
-                    self.logger.warning(f"Rate limit hit, waiting {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    self.logger.error(f"HTTP Error {response.status_code}: {response.text}")
-                    
+                reason = response.text[:300]
+                last_error = f"HTTP {response.status_code}: {reason}"
+                if 'Daily API request limit' in reason:
+                    break                     # nothing to gain from waiting within this run
+                if response.status_code == 400:
+                    break                     # invalid request
+                wait = (300 if 'Hourly' in reason else 5 * (attempt + 1) if 'concurrent' in reason
+                        else 60 if response.status_code == 429 else 5 * 2 ** attempt)
             except requests.exceptions.RequestException as e:
-                self.logger.error(f"Request failed (attempt {attempt + 1}): {str(e)}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                    
-        return None
-    
-    def fetch_location(self, country_code: str, zone_name: str, subzone: Dict,
-                       start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """
-        Fetch hourly weather for one city from the archive API (real historical weather).
-        All timestamps are UTC (timezone=GMT), matching the ENTSO-E data.
+                last_error = str(e)
+                wait = 5 * 2 ** attempt
+            if attempt < MAX_RETRIES - 1:
+                self.logger.warning(f"Request failed (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {wait} s: {last_error}")
+                time.sleep(wait)
+        raise RuntimeError(last_error)
 
-        Returns:
-            hourly weather DataFrame; empty DataFrame on failure
+    def fetch_location(self, country_code: str, zone_name: str, subzone: Dict,
+                       start: datetime, end: datetime) -> pd.DataFrame:
         """
+        Hourly weather for one city and [start, end) from the archive API (real historical weather).
+        All timestamps are UTC (timezone=GMT), matching the ENTSO-E data. Raises when the request fails.
+        """
+        last_day = (end - timedelta(microseconds=1)).date()      # the API's end_date is inclusive
         params = {
             'latitude': subzone['lat'],
             'longitude': subzone['lon'],
-            'start_date': start_date.strftime('%Y-%m-%d'),
-            'end_date': end_date.strftime('%Y-%m-%d'),
+            'start_date': start.strftime('%Y-%m-%d'),
+            'end_date': last_day.strftime('%Y-%m-%d'),
             'hourly': ','.join(self.hourly_params),
             'timezone': 'GMT',
         }
-
-        response_data = self._make_request(self.base_url, params)
-        if not response_data or 'hourly' not in response_data:
-            self.logger.warning(f"No weather data received for {subzone['name']}")
-            return pd.DataFrame()
+        days = (last_day - start.date()).days + 1
+        response_data = self._make_request(params, self.request_weight(days))
+        if 'hourly' not in response_data:
+            raise RuntimeError(f"no hourly data in response: {str(response_data)[:200]}")
 
         hourly = response_data['hourly']
         weather_df = pd.DataFrame({column: hourly.get(api_param) for api_param, column in self.hourly_params.items()})
         weather_df.insert(0, 'timestamp', pd.to_datetime(hourly['time']))
+        weather_df = weather_df[(weather_df['timestamp'] >= start) & (weather_df['timestamp'] < end)]
         weather_df = weather_df.assign(
             latitude=subzone['lat'],
             longitude=subzone['lon'],
@@ -368,78 +409,80 @@ class OpenMeteoClient:
         weather_df['weather_condition'] = weather_df['weather_code'].map(WMO_CONDITIONS).fillna('Unknown')
         return weather_df
 
-    def extract_all(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        """Fetch hourly weather for all cities in parallel."""
-        cities = [(country_code, zone_info['name'], subzone)
-                  for country_code, zone_info in self.weather_locations.items()
-                  for subzone in zone_info['subzones']]
-        self.logger.info(f"Fetching weather for {len(self.weather_locations)} countries, {len(cities)} cities "
-                         f"from {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d} ({MAX_WORKERS} parallel requests)")
-
-        parts, failed = [], []
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = {executor.submit(self.fetch_location, country_code, zone_name, subzone, start_date, end_date): subzone['name']
-                       for country_code, zone_name, subzone in cities}
-            for future in as_completed(futures):
-                city = futures[future]
-                try:
-                    weather_df = future.result()
-                except Exception as e:
-                    self.logger.error(f"Error fetching weather for {city}: {str(e)}")
-                    weather_df = pd.DataFrame()
-                if weather_df.empty:
-                    failed.append(city)
-                else:
-                    parts.append(weather_df)
-
-        self.failed_cities = sorted(failed)
-        if failed:
-            self.logger.warning(f"No data for {len(failed)} cities: {', '.join(self.failed_cities)}")
-
-        weather_data = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-        self.logger.info(f"Extracted {len(weather_data)} weather records")
-        return weather_data
-
     # Columns of staging_weather_data written by this script (table defined in database/create_warehouse.sql)
     STAGING_COLUMNS = ['timestamp', 'country_code', 'zone_name', 'subzone_code', 'subzone_name',
                        'temperature_avg', 'humidity', 'precipitation', 'wind_speed', 'wind_direction',
                        'air_pressure', 'cloud_cover', 'solar_radiation', 'weather_code', 'weather_condition',
                        'latitude', 'longitude']
 
-    def save_to_staging(self, weather_data: pd.DataFrame) -> bool:
-        """Replace the contents of staging_weather_data with weather_data (bulk insert)."""
-        if weather_data.empty:
-            self.logger.warning("No weather data to save")
-            return False
+    @staticmethod
+    def year_chunks(start: datetime, end: datetime) -> List[Tuple[datetime, datetime]]:
+        """Split [start, end) at calendar-year boundaries."""
+        chunks, chunk_start = [], start
+        while chunk_start < end:
+            chunk_end = min(datetime(chunk_start.year + 1, 1, 1), end)
+            chunks.append((chunk_start, chunk_end))
+            chunk_start = chunk_end
+        return chunks
 
-        # One backup file, overwritten on every run
-        try:
-            weather_data.to_csv('staging_weather_data.csv', index=False)
-        except Exception as e:
-            self.logger.warning(f"Could not write CSV backup: {str(e)}")
+    def extract_to_staging(self, start: datetime, end: datetime) -> Dict:
+        """
+        Fetch hourly weather for all cities and [start, end) per city and calendar year (parallel, paced to
+        the API limits) and write each chunk to staging_weather_data as it arrives (table emptied first).
 
+        Returns {'rows': n, 'failed': [...]}
+        """
+        cities = [(country_code, zone_info['name'], subzone)
+                  for country_code, zone_info in self.weather_locations.items()
+                  for subzone in zone_info['subzones']]
+        chunks = self.year_chunks(start, end)
+        tasks = [(country_code, zone_name, subzone, chunk_start, chunk_end)
+                 for country_code, zone_name, subzone in cities
+                 for chunk_start, chunk_end in chunks]
+        total_weight = sum(self.request_weight((chunk_end - chunk_start).days or 1) for *_, chunk_start, chunk_end in tasks)
+        self.logger.info(f"Open-Meteo {start:%Y-%m-%d} -> {end:%Y-%m-%d} (end exclusive): {len(cities)} cities x "
+                         f"{len(chunks)} chunks = {len(tasks)} requests, ~{total_weight:,.0f} weighted API calls "
+                         f"(limits: {LIMITS[3600]:,}/hour, {DAILY_LIMIT:,}/day)")
+        if total_weight > DAILY_LIMIT:
+            self.logger.warning("This period needs more than the daily API limit - split it over several days")
+
+        result = {'rows': 0, 'failed': []}
+        conn = pyodbc.connect(self.connection_string)
         try:
-            conn = pyodbc.connect(self.connection_string)
             cursor = conn.cursor()
             if cursor.execute("SELECT OBJECT_ID('dbo.staging_weather_data', 'U')").fetchone()[0] is None:
                 raise RuntimeError("staging_weather_data does not exist - run database/create_warehouse.sql first")
-
-            df = weather_data[self.STAGING_COLUMNS].astype(object)
-            df = df.where(pd.notna(df), None)  # NaN -> NULL
-            rows = [tuple(r) for r in df.itertuples(index=False, name=None)]
-
             cursor.execute("TRUNCATE TABLE dbo.staging_weather_data")
-            cursor.fast_executemany = True
-            cursor.executemany(
-                f"INSERT INTO dbo.staging_weather_data ({', '.join(self.STAGING_COLUMNS)}) "
-                f"VALUES ({', '.join('?' for _ in self.STAGING_COLUMNS)})", rows)
             conn.commit()
+            cursor.fast_executemany = True
+            insert_sql = (f"INSERT INTO dbo.staging_weather_data ({', '.join(self.STAGING_COLUMNS)}) "
+                          f"VALUES ({', '.join('?' for _ in self.STAGING_COLUMNS)})")
+
+            started = time.time()
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                futures = {executor.submit(self.fetch_location, *task): task for task in tasks}
+                for done, future in enumerate(as_completed(futures), 1):
+                    _, _, subzone, chunk_start, _ = futures[future]
+                    label = f"{subzone['name']} {chunk_start:%Y-%m-%d}"
+                    try:
+                        weather_df = future.result()
+                    except Exception as e:
+                        self.logger.error(f"FAILED {label}: {e}")
+                        result['failed'].append(f"{label}: {e}")
+                        continue
+                    df = weather_df[self.STAGING_COLUMNS].astype(object)
+                    df = df.where(pd.notna(df), None)  # NaN -> NULL
+                    rows = [(ts.to_pydatetime(), *rest) for ts, *rest in df.itertuples(index=False, name=None)]
+                    if rows:
+                        cursor.executemany(insert_sql, rows)
+                        conn.commit()
+                    result['rows'] += len(rows)
+                    if done % 25 == 0 or done == len(tasks):
+                        self.logger.info(f"{done}/{len(tasks)} requests done ({(time.time() - started) / 60:.1f} min), "
+                                         f"{result['rows']:,} rows")
+        finally:
             conn.close()
-            self.logger.info(f"Saved {len(rows)} weather records to staging_weather_data")
-            return True
-        except Exception as e:
-            self.logger.error(f"Error saving data to staging: {str(e)}")
-            return False
+        return result
 
 
 # Funkcja główna do uruchomienia z SSIS
@@ -490,48 +533,16 @@ def main():
     
     with EtlStep('WEATHER_EXTRACT', connection_string) as step:
         try:
-            # Inicjalizacja klienta
             client = OpenMeteoClient(connection_string)
-        
-            # Wyświetl informacje o krajach i miastach do przetworzenia
-            total_countries = len(client.weather_locations)
-            total_cities = sum(len(zone_info['subzones']) for zone_info in client.weather_locations.values())
-            print(f"Processing {total_countries} EU countries with {total_cities} cities:")
-        
-            for country_code, zone_info in client.weather_locations.items():
-                cities = [subzone['name'] for subzone in zone_info['subzones']]
-                print(f"  {zone_info['name']} ({country_code}): {', '.join(cities)}")
-        
-            print("\nStarting weather data extraction...")
-            weather_data = client.extract_all(start_date, end_date)
-
-            if weather_data.empty:
-                print("Warning: No weather data extracted")
-            else:
-                print(f"Successfully extracted {len(weather_data)} weather records for all EU subzones")
-            
-                # Podsumowanie danych per kraj
-                country_summary = weather_data.groupby('country_code').size().reset_index(name='records')
-                print("\nWeather data summary by country:")
-                for _, row in country_summary.iterrows():
-                    country_name = client.weather_locations[row['country_code']]['name']
-                    print(f"  {country_name} ({row['country_code']}): {row['records']} records")
-        
-            # Zapis do staging
-            print("\nSaving data to staging tables...")
-            success = client.save_to_staging(weather_data)
-            step.records = len(weather_data)
-            if client.failed_cities:
-                step.details = f"No data for {len(client.failed_cities)} cities: {', '.join(client.failed_cities)}"
-
-            if success:
-                print("EU weather data extraction completed successfully")
-                print(f"Total weather records: {len(weather_data)}")
-                sys.exit(0)
-            else:
-                print("Error occurred during EU weather data extraction")
+            result = client.extract_to_staging(start_date, end_date)
+            step.records = result['rows']
+            if result['failed']:
+                step.details = f"FAILED {len(result['failed'])} requests: " + '; '.join(result['failed'][:5])
+                print(f"{len(result['failed'])} requests failed - staging is incomplete")
                 sys.exit(1)
-            
+            print(f"EU weather data extraction completed successfully: {result['rows']:,} rows")
+            sys.exit(0)
+
         except Exception as e:
             print(f"Fatal error: {str(e)}")
             import traceback
