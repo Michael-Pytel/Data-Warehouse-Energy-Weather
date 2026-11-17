@@ -438,10 +438,10 @@ BEGIN
 
     -- unmatched keys and missing weather in the staged rows (decision G)
     SELECT @details = CONCAT('fact_load: +', @rows_inserted, ' new, ', @rows_updated, ' updated, of ', COUNT(*), ' staged',
-                             '; unknown zone: ', SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END),
-                             '; unknown profile: ', SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END),
-                             '; unknown weather condition: ', SUM(CASE WHEN weather_condition_key = 0 THEN 1 ELSE 0 END),
-                             '; no weather: ', SUM(CASE WHEN temperature_c IS NULL THEN 1 ELSE 0 END))
+                             '; unknown zone: ', ISNULL(SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END), 0),
+                             '; unknown profile: ', ISNULL(SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END), 0),
+                             '; unknown weather condition: ', ISNULL(SUM(CASE WHEN weather_condition_key = 0 THEN 1 ELSE 0 END), 0),
+                             '; no weather: ', ISNULL(SUM(CASE WHEN temperature_c IS NULL THEN 1 ELSE 0 END), 0))
     FROM #src;
 END;
 GO
@@ -449,7 +449,8 @@ GO
 -- -------------------------------------------------------------------------------------
 -- fact_generation: one row per zone, hour and production type; existing rows are updated when a
 -- reloaded value differs (never to NULL / Unknown), new rows inserted.
--- Unknown production types share key 0; their values are summed so the grain stays unique.
+-- Unknown production types share key 0; their values are summed so the grain stays unique. When a
+-- reload maps them to a known type, the Unknown row of that zone and hour is replaced.
 -- -------------------------------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_load_fact_generation
     @rows_inserted INT = 0 OUTPUT,
@@ -477,7 +478,21 @@ BEGIN
     GROUP BY CONVERT(INT, CONVERT(CHAR(8), g.timestamp, 112)), CAST(DATEPART(HOUR, g.timestamp) AS TINYINT),
              ISNULL(z.bidding_zone_key, 0), ISNULL(p.socioeconomic_profile_key, 0), ISNULL(t.generation_type_key, 0);
 
+    DECLARE @rows_reclassified INT;
     BEGIN TRANSACTION;
+    -- An Unknown row (key 0) whose production type is known now (e.g. after B25 was added to
+    -- dim_generation_type): the reload brings these values in under their real key, so the old
+    -- Unknown row is removed. Otherwise the same generation would be counted twice.
+    DELETE f
+    FROM dbo.fact_generation f
+    WHERE f.generation_type_key = 0
+      AND EXISTS (SELECT 1 FROM #src s
+                  WHERE s.date_key = f.date_key AND s.time_key = f.time_key AND s.bidding_zone_key = f.bidding_zone_key)
+      AND NOT EXISTS (SELECT 1 FROM #src s
+                      WHERE s.date_key = f.date_key AND s.time_key = f.time_key AND s.bidding_zone_key = f.bidding_zone_key
+                        AND s.generation_type_key = 0);
+    SET @rows_reclassified = @@ROWCOUNT;
+
     UPDATE f
     SET socioeconomic_profile_key = n.socioeconomic_profile_key, is_public_holiday = n.is_public_holiday,
         generation_mwh = n.generation_mwh, updated_at = SYSUTCDATETIME()
@@ -505,9 +520,11 @@ BEGIN
     COMMIT TRANSACTION;
 
     SELECT @details = CONCAT('fact_generation: +', @rows_inserted, ' new, ', @rows_updated, ' updated, of ', COUNT(*), ' staged',
-                             '; unknown zone: ', SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END),
-                             '; unknown profile: ', SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END),
-                             '; unknown production type: ', SUM(CASE WHEN generation_type_key = 0 THEN 1 ELSE 0 END))
+                             CASE WHEN @rows_reclassified > 0
+                                  THEN CONCAT(', ', @rows_reclassified, ' Unknown rows replaced by a known type') END,
+                             '; unknown zone: ', ISNULL(SUM(CASE WHEN bidding_zone_key = 0 THEN 1 ELSE 0 END), 0),
+                             '; unknown profile: ', ISNULL(SUM(CASE WHEN socioeconomic_profile_key = 0 THEN 1 ELSE 0 END), 0),
+                             '; unknown production type: ', ISNULL(SUM(CASE WHEN generation_type_key = 0 THEN 1 ELSE 0 END), 0))
     FROM #src;
 
     DECLARE @unknown_codes NVARCHAR(200) =

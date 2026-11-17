@@ -467,7 +467,8 @@ SELECT h.n, RIGHT('0' + CAST(h.n AS VARCHAR(2)), 2) + ':00'
 FROM (SELECT TOP (24) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS n FROM sys.all_objects) AS h
 WHERE NOT EXISTS (SELECT 1 FROM dbo.dim_time t WHERE t.time_key = h.n);
 
--- ENTSO-E production types (B10 pumped storage only shifts energy, so it is not renewable)
+-- ENTSO-E production types (B10 pumped storage and B25 energy storage, i.e. batteries, only shift energy,
+-- so they are not renewable). Keys follow the code number; B25 added in step 3.1.
 INSERT INTO dbo.dim_generation_type
     (generation_type_key, entsoe_code, generation_type_name, generation_category, is_renewable, is_intermittent)
 SELECT v.k, v.code, v.name, v.category, v.renewable, v.intermittent
@@ -492,7 +493,8 @@ FROM (VALUES
     (17, N'B17', N'Waste',                           N'Other',     N'No',  N'No'),
     (18, N'B18', N'Wind Offshore',                   N'Renewable', N'Yes', N'Yes'),
     (19, N'B19', N'Wind Onshore',                    N'Renewable', N'Yes', N'Yes'),
-    (20, N'B20', N'Other',                           N'Other',     N'No',  N'No')
+    (20, N'B20', N'Other',                           N'Other',     N'No',  N'No'),
+    (25, N'B25', N'Energy storage',                  N'Storage',   N'No',  N'No')
 ) AS v (k, code, name, category, renewable, intermittent)
 WHERE NOT EXISTS (SELECT 1 FROM dbo.dim_generation_type g WHERE g.generation_type_key = v.k);
 
