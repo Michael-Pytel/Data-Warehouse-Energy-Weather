@@ -300,21 +300,24 @@ GO
 
 -- -------------------------------------------------------------------------------------
 -- Weather per country and hour (decision A): average of the cities that have a value,
--- circular mean for wind direction, most frequent condition (ties: higher WMO code)
+-- circular mean for wind direction, most frequent condition (ties: higher WMO code).
+-- Averages are exact DECIMAL arithmetic, and the wind components are rounded before ATN2, so the
+-- result does not depend on the summation order of a parallel plan (FLOAT averages could round
+-- differently between runs, which would make reloads report false changes).
 -- -------------------------------------------------------------------------------------
 CREATE OR ALTER VIEW dbo.vw_weather_country_hour
 AS
 WITH agg AS (
     SELECT w.timestamp, w.country_code,
-           AVG(CAST(w.temperature_avg AS FLOAT)) AS temperature_c,
-           AVG(CAST(w.humidity        AS FLOAT)) AS humidity_pct,
-           AVG(CAST(w.precipitation   AS FLOAT)) AS precipitation_mm,
-           AVG(CAST(w.wind_speed      AS FLOAT)) AS wind_speed_kmh,
-           AVG(SIN(RADIANS(CAST(w.wind_direction AS FLOAT)))) AS wind_sin,
-           AVG(COS(RADIANS(CAST(w.wind_direction AS FLOAT)))) AS wind_cos,
-           AVG(CAST(w.cloud_cover     AS FLOAT)) AS cloud_cover_pct,
-           AVG(CAST(w.solar_radiation AS FLOAT)) AS solar_radiation_wm2,
-           AVG(CAST(w.air_pressure    AS FLOAT)) AS air_pressure_hpa
+           AVG(w.temperature_avg) AS temperature_c,
+           AVG(w.humidity)        AS humidity_pct,
+           AVG(w.precipitation)   AS precipitation_mm,
+           AVG(w.wind_speed)      AS wind_speed_kmh,
+           ROUND(AVG(SIN(RADIANS(CAST(w.wind_direction AS FLOAT)))), 9) AS wind_sin,
+           ROUND(AVG(COS(RADIANS(CAST(w.wind_direction AS FLOAT)))), 9) AS wind_cos,
+           AVG(w.cloud_cover)     AS cloud_cover_pct,
+           AVG(w.solar_radiation) AS solar_radiation_wm2,
+           AVG(w.air_pressure)    AS air_pressure_hpa
     FROM dbo.staging_weather_data w
     GROUP BY w.timestamp, w.country_code
 ), cond AS (
@@ -326,7 +329,8 @@ WITH agg AS (
     GROUP BY w.timestamp, w.country_code, w.weather_condition
 )
 SELECT a.timestamp, a.country_code, a.temperature_c, a.humidity_pct, a.precipitation_mm, a.wind_speed_kmh,
-       CASE WHEN a.wind_sin IS NULL THEN NULL
+       -- no mean direction when the cities' winds cancel out (both components 0; ATN2(0, 0) is an error)
+       CASE WHEN a.wind_sin IS NULL OR (a.wind_sin = 0 AND a.wind_cos = 0) THEN NULL
             ELSE CAST(ROUND(DEGREES(ATN2(a.wind_sin, a.wind_cos)) + 360, 0) AS INT) % 360 END AS wind_direction_deg,
        a.cloud_cover_pct, a.solar_radiation_wm2, a.air_pressure_hpa,
        c.weather_condition
