@@ -37,6 +37,7 @@ ssis/obj/
 CLAUDE.md
 docs/PLAN.md
 docs/POWERBI_REPORT.md
+docs/07-design-decisions.md
 
 # OS / misc
 *.lnk
