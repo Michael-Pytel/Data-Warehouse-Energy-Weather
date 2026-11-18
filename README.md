@@ -150,6 +150,7 @@ percent of Ireland's day-ahead forecasts and some months of its load; Spain miss
 | `etl/` | Python extract and reference scripts; `zones.py` (countries, bidding zones, Eurostat codes), `etl_log.py` (logging) |
 | `ssis/` | SSIS project and package `Main_ETL_Process.dtsx` |
 | `tools/check_generated_files.py` | lists generated and local files and where they come from |
+| `tools/powerbi/` | scripts that generate the Wind and Solar pages and the guide overlay in the report files |
 | `docs/` | `ETL_Pipeline.png` and `star_schema.png` (the diagrams above) |
 | `powerbi/` | the Power BI report as a project (`.pbip`: semantic model and pages) and its theme |
 
