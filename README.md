@@ -1,195 +1,170 @@
-# ENTSO-E Weather Data Platform
+# Energy & Weather Data Platform
 
-A data warehouse that combines European electricity data, weather and socio-economic indicators for
-**all 27 EU countries**, hour by hour, in SQL Server, with a four-page Power BI report on top
-(see [Power BI report](#power-bi-report))..
+A data warehouse that combines **European electricity data, weather and the economy, hour by hour, for all
+27 EU countries** from 2023 to 2025, built with Python, SSIS and SQL Server, and reported in Power BI.
 
-| Source | What | Grain |
+![Power BI report, Overview page](docs/images/report-overview.png)
+
+## The business case
+
+**Audience:** European representatives and the energy-policy teams who advise them on where EU funding
+for renewable energy should go.
+
+**The question:** *in which countries would new wind and solar capacity make the most difference?*
+
+Funding decisions are usually made from yearly national statistics. This dashboard puts hourly
+electricity data from the grid operators next to the weather that drives wind and solar output and the
+economic situation of each country, so the answer rests on four kinds of evidence:
+
+| Lens | What the dashboard shows | Example finding (2023–2025) |
 |---|---|---|
-| [ENTSO-E Transparency Platform](https://transparency.entsoe.eu) | actual total load, day-ahead load forecast, actual generation per production type | 28 bidding zones (Denmark has DK1 and DK2), hourly |
-| [Open-Meteo](https://open-meteo.com) historical weather (archive API) | temperature, humidity, precipitation, wind, cloud cover, solar radiation, pressure, WMO weather code | 89 representative cities, hourly |
-| [Eurostat](https://ec.europa.eu/eurostat) | population, GDP per capita, household electricity price, energy intensity, unemployment rate | country and year |
+| **Untapped resource** | countries with more wind or sun than the median country but less wind or solar output per person | wind: Latvia, Estonia, Luxembourg, France, Poland; solar: Croatia, Romania, France, Slovenia, Slovakia, Czechia |
+| **Fossil dependence** | where the generation mix still relies on fossil fuels, so new renewables would replace the most fossil generation | renewable share ranges from 16 % (Czechia) to 88 % (Luxembourg) |
+| **Momentum** | where renewables are already growing fast and where they lag behind | EU solar generation +41 % from 2023 to 2025, with large differences between countries |
+| **Grid readiness** | how predictable demand is and how closely wind and solar follow the weather, which shows where storage, grid and forecasting need to grow along with new capacity | day-ahead forecast error from 1.4 % (Czechia) to 15.4 % (Netherlands) |
 
-Loaded period: **2023-01-01 → 2025-12-31** (26,304 hours, UTC): 663,129 load rows and 7.2 million
-generation rows.
+Economic context (GDP and demand per person, household electricity prices) shows how much a country can
+invest by itself and how much households would gain from cheaper electricity.
+
+The dashboard points to where a closer look is worthwhile; it does not replace a feasibility study. It
+does not include installed capacity, grid connections, land use, costs or national policy. Output per
+person stands in for installed capacity until ENTSO-E capacity data is added.
+
+## The questions behind it
+
+- **Demand:** how much do weather, weekdays, public holidays and the economy change electricity demand?
+- **Forecasts:** how accurate are the grid operators' day-ahead demand forecasts, and where do they miss?
+- **Generation mix:** where does Europe's electricity come from, and how fast is the mix changing?
+- **Wind and solar:** how closely do they follow the weather, and which countries could use more of it?
+
+Answering these needs electricity, weather and economic data on one time axis, which no single source
+provides.
+
+## At a glance
+
+| | |
+|---|---|
+| **Coverage** | 27 EU countries, 28 bidding zones, 1 Jan 2023 – 31 Dec 2025: 26,304 hours (UTC) |
+| **Sources** | 3 public APIs: ENTSO-E Transparency Platform, Open-Meteo, Eurostat |
+| **Warehouse** | galaxy schema (2 fact tables sharing their dimensions), 7.9 million fact rows, SCD Type 2 history |
+| **Pipeline** | 9-step SSIS package, incremental and safe to rerun, full load in about 1.5 hours |
+| **Report** | 6 Power BI pages with titles that state the finding and update with the filters |
+| **Stack** | SQL Server 2025 · T-SQL · SSIS · Python 3.12 (pandas, pyodbc, requests) · Power BI (DAX, PBIP, Deneb) |
 
 ## Architecture
 
-![ETL pipeline: sources, Python extract, staging, T-SQL loads, star schema, Power BI](docs/ETL_Pipeline.png)
+```mermaid
+flowchart LR
+    SRC["<b>Data sources</b><br/><small>ENTSO-E · Open-Meteo · Eurostat</small>"]
+    PY["<b>Python extract</b><br/><small>rate limits · retries · parallel requests</small>"]
+    STG[("<b>Staging</b><br/><small>SQL Server</small>")]
+    TSQL["<b>T-SQL transform</b><br/><small>incremental · SCD Type 2</small>"]
+    DW[("<b>Galaxy schema</b><br/><small>2 fact tables · 6 dimensions</small>")]
+    PBI["<b>Power BI</b><br/><small>6 report pages</small>"]
+    SSIS{{"<b>SSIS</b><br/><small>runs the 9 steps</small>"}}
+    LOG[("<b>etl_log</b><br/><small>run and step status</small>")]
 
-Solid arrows show the data flow, dotted arrows the control: the SSIS package `ssis/Main_ETL_Process.dtsx`
-runs the scripts and procedures, and every step records its status in `etl_log`.
+    SRC --> PY --> STG --> TSQL --> DW --> PBI
+    SSIS -.-> PY
+    SSIS -.-> TSQL
+    PY -.-> LOG
+    TSQL -.-> LOG
 
-The pipeline is **ELT**: Python extracts the data and loads it into staging tables with only light
-cleaning on the way (ENTSO-E 15/30-minute values averaged to hourly, WMO weather codes mapped to condition
-names); the business transformations (weather per country, keys, slowly changing dimensions, facts,
-updates of changed values) run afterwards as set-based T-SQL inside SQL Server.
+    %% Same colours per layer as the detailed diagram (docs/diagram/etl-pipeline.mmd)
+    style SRC fill:#FFF0FB,stroke:#E07BE0,color:#1A1A1A
+    style PY fill:#EDFDFB,stroke:#4FD1C5,color:#1A1A1A
+    style STG fill:#E8FDFF,stroke:#5CCFE0,color:#1A1A1A
+    style TSQL fill:#EEFBF0,stroke:#7FD69A,color:#1A1A1A
+    style DW fill:#F3F2FF,stroke:#9B8CF0,color:#1A1A1A
+    style LOG fill:#FFF5EB,stroke:#F0A050,color:#1A1A1A
+    style PBI fill:#FFFFFF,stroke:#1A1A1A,color:#1A1A1A
+    style SSIS fill:#FFFFFF,stroke:#1A1A1A,color:#1A1A1A
+```
+
+The pipeline is **ELT**. Python scripts extract the data from the three APIs, handling rate limits,
+retries and parallel requests, and load it into staging tables. The business transformations (weather
+per country, keys, slowly changing dimensions, facts) then run as set-based T-SQL inside SQL Server. One
+SSIS package runs all nine steps in order, and every step records its status and row counts in a log
+table.
+
+Loads are **incremental**: rerunning a period changes nothing, a new period only adds rows, and
+corrections published by the source update the stored values.
+
+→ [Data sources](docs/01-data-sources.md) · [ETL pipeline](docs/02-etl-pipeline.md)
 
 ## Data model
 
-Two fact tables share the date, time, bidding zone and socio-economic dimensions (diagram exported from
-SSMS; history, staging, reference and log tables are not shown):
+```mermaid
+flowchart LR
+    WC["dim_weather_condition<br/><small>WMO-based condition</small>"]
+    FL["<b>fact_load</b><br/><small>zone × hour<br/>load · forecast · weather</small>"]
+    D1["dim_date<br/><small>day</small>"]
+    D2["dim_time<br/><small>UTC hour</small>"]
+    D3["dim_bidding_zone<br/><small>zone · SCD 2</small>"]
+    D4["dim_socioeconomic_profile<br/><small>country × year · SCD 2</small>"]
+    FG["<b>fact_generation</b><br/><small>zone × hour × production type<br/>generation</small>"]
+    GT["dim_generation_type<br/><small>production type</small>"]
 
-![Star schema of EnergyWeatherDW](docs/star_schema.png)
+    WC --- FL
+    FL --- D1 & D2 & D3 & D4
+    D1 & D2 & D3 & D4 --- FG
+    FG --- GT
 
-| Table | Grain | Contents |
-|---|---|---|
-| `fact_load` | bidding zone × hour | actual load and day-ahead forecast (MWh), the country's weather (average of its cities), heating/cooling degree hours, public-holiday flag |
-| `fact_generation` | bidding zone × hour × production type | generation (MWh) |
-| `dim_date`, `dim_time` | day, UTC hour | calendar attributes |
-| `dim_bidding_zone` (+ `_history`) | zone | name, country, time zone; SCD Type 2 |
-| `dim_socioeconomic_profile` (+ `_history`) | country × year | the five Eurostat indicators; SCD Type 2 for revisions; `is_estimated` when a year is not published yet and the latest year is used |
-| `dim_generation_type` | ENTSO-E production type (B01–B20, B25) | category, renewable, intermittent |
-| `dim_weather_condition` | condition derived from the WMO weather code | severity |
-| `ref_public_holiday` | country × date | public holidays (Python `holidays` package) |
-| `etl_log` | run / step | start, end, status, row counts, details of every run |
-
-Facts link to the socio-economic figures of **their own year** (2024 energy with 2024 population).
-Unknown values stay `NULL`; only keys that cannot be matched point to an "Unknown" row (key 0) and are
-counted in `etl_log`. Country totals (e.g. DK1 + DK2) are summed in the report.
-
-## How a run works
-
-The SSIS package runs these tasks in order:
-
-| # | Task | Does |
-|---|---|---|
-| 1 | Start Run | refuses to start if another run is in progress, opens an `ETL_RUN` row in `etl_log` |
-| 2 | Extract ENTSO-E Data | `entsoe_client.py`: 3-month requests, 12 in parallel, rate-limited and retried; sub-hourly values averaged to hourly |
-| 3 | Extract Weather Data | `open_meteo_client.py`: one request per city and year, paced to the free API limits |
-| 4 | Extract Eurostat Data | `eurostat_client.py`: the five indicators (JSON-stat); any failed or empty query fails the step |
-| 5 | Load Reference Data | `reference_loader.py`: bidding zones from `etl/zones.py`, public holidays per country |
-| 6 | Load Dimensions | `EXEC dbo.usp_load_dimensions` (dates, SCD Type 2 zones and socio-economic profiles) |
-| 7 | Load Facts | `EXEC dbo.usp_load_facts` |
-| 8 | Key Check | `fix_null_values.py`: no fact key may be NULL; counts rows on "Unknown" |
-| 9 | Finish Run | closes the run as SUCCESS; an OnError handler closes it as FAILED |
-
-Loads are **incremental**: rerunning a period with unchanged data changes nothing, a new period adds
-rows, and values that changed at the source (e.g. ENTSO-E corrections) update the stored rows. A stored
-value is never replaced by an empty one, so a gap in one download cannot erase data.
-
-## Setup
-
-Requirements (tested on Windows 11):
-
-- SQL Server 2025 (tested with the free Developer edition) and SSMS. The old `Driver={SQL Server}` and
-  SQL Native Client do not work with it; use the drivers below.
-- Visual Studio with the *SQL Server Integration Services Projects* extension
-- Python 3.12, ODBC Driver 18 for SQL Server, OLE DB Driver 19 for SQL Server (used by SSIS)
-- A free ENTSO-E API token (Transparency Platform → My Account → Web API Security Token)
-
-Steps:
-
-1. Run `database/create_warehouse.sql`, then `database/load_warehouse.sql` (e.g. in SSMS). Both are safe
-   to run again: they only create what is missing and update the procedures.
-2. `pip install -r requirements.txt`
-3. Set the Windows user environment variable `ENTSO_TOKEN` (see `.env.example`; the token never goes into
-   code or the package). `DW_CONNECTION_STRING` is optional; the default is the local `EnergyWeatherDW`
-   with Windows authentication.
-4. Open `ssis/EnergyWeatherETL.sln`, check the package variables `PythonPath` (default `python.exe` on
-   PATH), `ScriptsFolder` (the full path of `etl/`), `StartDate`, `EndDate` (exclusive), `Countries`,
-   `SinceYear`, and run `Main_ETL_Process.dtsx`.
-
-The full period takes about **1.5 hours**: ~30 minutes for ENTSO-E (1,008 requests of ~14 s each) and
-~1 hour for weather, because the Open-Meteo free tier allows 5,000 weighted calls per hour and the full
-period needs ~7,000 (don't run it twice on the same day; the daily limit is 10,000). One month takes
-about 3 minutes.
-
-Without SSIS, e.g. to re-run one failed step or test one source, each step also runs on its own
-(from `etl/`, with `ENTSO_TOKEN` set; December 2025 as an example period, end date exclusive):
-
-```powershell
-python entsoe_client.py --start 2025-12-01 --end 2026-01-01   # task 2 Extract ENTSO-E Data
-python open_meteo_client.py 2025-12-01 2026-01-01              # task 3 Extract Weather Data
-python eurostat_client.py 2020                                 # task 4 Extract Eurostat Data (all 27 countries since 2020)
-python reference_loader.py 2025-12-01 2026-01-01               # task 5 Load Reference Data
+    classDef fact fill:#F2A900,stroke:#B87F00,color:#0E2A5C
+    classDef dim fill:#0E2A5C,stroke:#0E2A5C,color:#FFFFFF
+    class FL,FG fact
+    class WC,D1,D2,D3,D4,GT dim
 ```
 
-```sql
-EXEC dbo.usp_load_dimensions;   -- task 6 Load Dimensions
-EXEC dbo.usp_load_facts;        -- task 7 Load Facts
-```
+The warehouse is a **galaxy schema** (fact constellation): two fact tables at their natural grain share the date, hour, bidding zone and socio-economic
+dimensions: `fact_load` (zone × hour: demand, forecast, weather) and `fact_generation`
+(zone × hour × production type). Eurostat figures are linked by **country and year**, so 2024 energy is
+compared with 2024 population, and revisions are kept as history (SCD Type 2).
 
-```powershell
-python fix_null_values.py                                      # task 8 Key Check
-```
+→ [Data model](docs/03-data-model.md) · [Logging and data quality](docs/04-data-quality.md)
 
-The console output also goes to `etl/log/`. The Eurostat extract can be run for a subset of countries or a
-later `SinceYear`: the dimension load only rebuilds the country-years the Eurostat staging data covers, keeps
-the current version of all others, and never replaces a stored figure by NULL.
+## Power BI report
 
-## Checking a run
+Six pages with shared Year and Country filters. Each chart title states the main finding for the current
+selection (for example "Demand peaked in Jan 24 at 242.5 TWh"), and a **Guide** button on every page
+explains how to read it.
 
-- **`etl_log`**: one `ETL_RUN` row per package run and one row per step, linked by `run_id`, with status,
-  row counts and details (rows per data type, days ENTSO-E could not serve, unmatched keys):
+| | |
+|---|---|
+| [![Load & forecast](docs/images/report-load-forecast.png)](docs/images/report-load-forecast.png) **Load & forecast:** forecast accuracy by month and country, demand by weekday and hour, weekends and holidays | [![Generation mix](docs/images/report-generation-mix.png)](docs/images/report-generation-mix.png) **Generation mix:** sources by hour of day, month and country, the largest production types |
+| [![Wind](docs/images/report-wind.png)](docs/images/report-wind.png) **Wind:** wind speed vs wind output, wind rose, countries with room to grow | [![Solar](docs/images/report-solar.png)](docs/images/report-solar.png) **Solar:** sunshine vs solar output, daily profile by season, growth per country |
+| [![What drives demand](docs/images/report-weather-economy.png)](docs/images/report-weather-economy.png) **What drives demand:** temperature, heating and cooling degree days, GDP and demand per person | |
 
-  ```sql
-  SELECT log_id, run_id, process_name, status, records_processed, start_time, end_time,
-         execution_details, error_message
-  FROM dbo.etl_log ORDER BY log_id DESC;
-  ```
+Some findings for 2023–2025: renewables supplied **43.9 %** of generation; day-ahead forecasts missed
+actual demand by **3.3 %** on average; demand rises about **1.1 % per 1 °C colder**; daily wind output
+follows wind speed with **r = 0.81**, and solar output follows radiation with **r = 0.93**.
 
-- **`etl/log/`**: the full console output of every script run (`<script>_<date>_<time>.log`, last 30 per
-  script). SSIS does not keep this output, so a failed step's `etl_log` row names its log file.
-- **`python tools/check_generated_files.py --since 2h`**: lists the files a run wrote outside the repository
-  and flags anything unexpected.
+→ [Power BI report](docs/05-power-bi-report.md)
 
-## Known data gaps
+## Documentation
 
-Coverage is complete (≥ 99.7 % of hours) for 22 of the 28 zones. The gaps are at the source:
-ENTSO-E publishes no data for Bulgaria and Malta, almost nothing for Cyprus before mid-2025, only a few
-percent of Ireland's day-ahead forecasts and some months of its load; Spain misses 35 hours of the
-28 April 2025 blackout.
+| Document | Contents |
+|---|---|
+| [01 Data sources](docs/01-data-sources.md) | the three APIs, what is extracted, limits and quirks |
+| [02 ETL pipeline](docs/02-etl-pipeline.md) | the SSIS package step by step, ELT, incremental loads, run times |
+| [03 Data model](docs/03-data-model.md) | galaxy schema, tables and grain, SCD Type 2, missing-value rules |
+| [04 Logging and data quality](docs/04-data-quality.md) | run log, checks, coverage per country, known gaps at the source |
+| [05 Power BI report](docs/05-power-bi-report.md) | the six pages, how the figures are calculated, the report as code |
+| [06 Setup](docs/06-setup.md) | requirements, installation, running the pipeline, troubleshooting |
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `database/create_warehouse.sql` | the schema: staging, dimensions, facts, reference tables, `etl_log` and its procedures |
-| `database/load_warehouse.sql` | T-SQL load procedures and the weather-per-country view |
-| `etl/` | Python extract and reference scripts; `zones.py` (countries, bidding zones, Eurostat codes), `etl_log.py` (logging) |
-| `ssis/` | SSIS project and package `Main_ETL_Process.dtsx` |
-| `tools/check_generated_files.py` | lists generated and local files and where they come from |
-| `tools/powerbi/` | scripts that generate the Wind and Solar pages and the guide overlay in the report files |
-| `docs/` | `ETL_Pipeline.png` and `star_schema.png` (the diagrams above) |
-| `powerbi/` | the Power BI report as a project (`.pbip`: semantic model and pages) and its theme |
-
-## Power BI report
-
-`powerbi/Data-Warehouse-Energy-Weather-Report.pbip` is a Power BI project: the semantic model is stored as
-TMDL and the pages as JSON (PBIR), so the report is versioned as text. It imports the facts and dimensions
-of `EnergyWeatherDW`; the data itself is not in git.
-
-| Page | Shows |
-|---|---|
-| Overview | key figures; renewable share by country on a map (20 % classes); monthly generation by source with demand; generation mix by year |
-| Load & forecast | monthly day-ahead forecast error or bias (switch), forecast error by country, average demand by weekday and hour (UTC), demand on weekends and public holidays compared with working days |
-| Generation mix | average generation by hour of day and source, the ten largest production types, renewable share per month, generation mix per country |
-| Weather & socio-economics | daily demand against temperature by season, heating and cooling degree days per country, demand per person against GDP per person, a socio-economic profile per country |
-
-All pages share the Year and Country slicers. Chart titles state the main finding for the current
-selection (e.g. "Demand peaked in Jan 24 at 242.5 TWh") and change with the slicers. Bulgaria and Malta are
-excluded by a report-level filter because ENTSO-E has no data for them.
-
-How the figures are calculated:
-
-- Energy is summed; temperature, humidity, wind and other weather values are averaged; shares and ratios are
-  calculated from sums (e.g. renewable share = renewable generation / all generation).
-- Forecast error = Σ|forecast − actual| / Σ actual and bias = Σ(forecast − actual) / Σ actual, over hours
-  with both values.
-- Population is averaged over the selected years, never summed. Demand per person only uses country-years
-  with at least 95 % of hours covered by load data, so incomplete data gives no value instead of a too-low
-  one (Cyprus: none; Ireland: 2024 only). GDP per person, electricity price and unemployment are
-  population-weighted for groups of countries.
-- Demand on weekends and public holidays is compared with working days within each bidding zone, because
-  public holidays differ per country.
-
-To open it: Power BI Desktop (tested with version 2.159) → open the `.pbip` → **Home → Refresh**. The model
-connects to `localhost`, database `EnergyWeatherDW`, with Windows authentication; the first refresh loads
-the 7.9 million fact rows and takes a few minutes. The colours come from `powerbi/theme/EnergyWeatherTheme.json`,
-which is already registered in the report.
+| [`database/`](database/) | schema (`create_warehouse.sql`) and T-SQL load procedures (`load_warehouse.sql`) |
+| [`etl/`](etl/) | Python extract and reference-data scripts, shared country/zone list and logging |
+| [`ssis/`](ssis/) | SSIS project with the package `Main_ETL_Process.dtsx` |
+| [`powerbi/`](powerbi/) | Power BI report as a project (`.pbip`: model in TMDL, pages in JSON) and its theme |
+| [`tools/`](tools/) | check of generated files; generators for report pages |
+| [`docs/`](docs/) | the documents above and their images |
 
 ## Data sources and terms
 
-Electricity data: ENTSO-E Transparency Platform. Weather data: Open-Meteo.com (CC BY 4.0).
-Socio-economic data: © European Union, Eurostat. Use of the data is subject to each source's terms.
+Electricity data: [ENTSO-E Transparency Platform](https://transparency.entsoe.eu). Weather data:
+[Open-Meteo.com](https://open-meteo.com) (CC BY 4.0). Socio-economic data: © European Union,
+[Eurostat](https://ec.europa.eu/eurostat). Use of the data is subject to each source's terms.
