@@ -199,6 +199,62 @@ table fact_load
 
 		annotation SummarizationSetBy = Automatic
 
+	/// Compass sector the wind comes from: 0 = N, 1 = NNE, ... 15 = NNW (22.5° each, centred on the direction)
+	column 'Wind Sector No' =
+			
+			IF (
+			    NOT ISBLANK ( fact_load[wind_direction_deg] ),
+			    INT ( MOD ( ROUND ( fact_load[wind_direction_deg] / 22.5, 0 ), 16 ) )
+			)
+		dataType: int64
+		formatString: 0
+		lineageTag: c7d1e2f3-0001-4a5b-8c6d-0000000000a1
+		summarizeBy: none
+
+		annotation SummarizationSetBy = User
+
+	column 'Wind Sector' =
+			
+			IF (
+			    NOT ISBLANK ( fact_load[Wind Sector No] ),
+			    PATHITEM ( "N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW", fact_load[Wind Sector No] + 1 )
+			)
+		lineageTag: c7d1e2f3-0002-4a5b-8c6d-0000000000a2
+		summarizeBy: none
+		sortByColumn: 'Wind Sector No'
+
+		changedProperty = SortByColumn
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Wind speed class for the wind rose: 0 = below 10 km/h ... 3 = 30 km/h and more
+	column 'Wind Speed Band No' =
+			
+			IF (
+			    NOT ISBLANK ( fact_load[wind_speed_kmh] ),
+			    SWITCH ( TRUE (), fact_load[wind_speed_kmh] < 10, 0, fact_load[wind_speed_kmh] < 20, 1, fact_load[wind_speed_kmh] < 30, 2, 3 )
+			)
+		dataType: int64
+		formatString: 0
+		lineageTag: c7d1e2f3-0003-4a5b-8c6d-0000000000a3
+		summarizeBy: none
+
+		annotation SummarizationSetBy = User
+
+	column 'Wind Speed Band' =
+			
+			IF (
+			    NOT ISBLANK ( fact_load[Wind Speed Band No] ),
+			    PATHITEM ( "Below 10 km/h|10–20 km/h|20–30 km/h|30 km/h and more", fact_load[Wind Speed Band No] + 1 )
+			)
+		lineageTag: c7d1e2f3-0004-4a5b-8c6d-0000000000a4
+		summarizeBy: none
+		sortByColumn: 'Wind Speed Band No'
+
+		changedProperty = SortByColumn
+
+		annotation SummarizationSetBy = Automatic
+
 	partition fact_load = m
 		mode: import
 		source =

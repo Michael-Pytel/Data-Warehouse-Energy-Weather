@@ -840,6 +840,482 @@ table _Measures
 		displayFolder: Titles
 		lineageTag: b1c2d3e4-0004-4f5a-9b8c-000000000104
 
+	/// Wind Onshore (B19) + Wind Offshore (B18)
+	measure 'Wind Generation (MWh)' =
+			
+			CALCULATE ( [Generation (MWh)], dim_generation_type[entsoe_code] IN { "B18", "B19" } )
+		formatString: #,0
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0101-4a5b-8c6d-000000000101
+
+	measure 'Wind Generation (TWh)' = DIVIDE ( [Wind Generation (MWh)], 1000000 )
+		formatString: #,0.0
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0102-4a5b-8c6d-000000000102
+
+	measure 'Wind Generation (GWh)' = DIVIDE ( [Wind Generation (MWh)], 1000 )
+		formatString: #,0
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0103-4a5b-8c6d-000000000103
+
+	measure 'Wind Share %' =
+			
+			DIVIDE ( [Wind Generation (MWh)], CALCULATE ( [Generation (MWh)], REMOVEFILTERS ( dim_generation_type ) ) )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0104-4a5b-8c6d-000000000104
+
+	/// Offshore part of wind generation; 0 % for countries with wind but no offshore wind
+	measure 'Offshore Share of Wind %' =
+			
+			VAR _wind = [Wind Generation (MWh)]
+			RETURN
+			    IF ( _wind > 0, DIVIDE ( CALCULATE ( [Generation (MWh)], dim_generation_type[entsoe_code] = "B18" ) + 0, _wind ) )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0105-4a5b-8c6d-000000000105
+
+	/// Pearson correlation between daily average wind speed and daily wind generation
+	measure 'Wind Output Correlation (r)' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Wind Speed (km/h)], "@y", [Wind Generation (MWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			VAR _sxy = SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) )
+			VAR _sxx = SUMX ( _days, ( [@x] - _mx ) ^ 2 )
+			VAR _syy = SUMX ( _days, ( [@y] - _my ) ^ 2 )
+			RETURN
+			    DIVIDE ( _sxy, SQRT ( _sxx * _syy ) )
+		formatString: 0.00
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0106-4a5b-8c6d-000000000106
+
+	/// Linear fit of daily wind generation on daily average wind speed: GWh per day for each extra km/h
+	measure 'Wind GWh per km/h' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Wind Speed (km/h)], "@y", [Wind Generation (GWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			RETURN
+			    DIVIDE ( SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) ), SUMX ( _days, ( [@x] - _mx ) ^ 2 ) )
+		formatString: #,0.0
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0107-4a5b-8c6d-000000000107
+
+	/// Share of zone-days with generation data (day level keeps the check cheap; gaps at the source are whole days or months)
+	measure 'Generation Coverage %' =
+			
+			DIVIDE (
+			    COUNTROWS ( SUMMARIZE ( fact_generation, fact_generation[bidding_zone_key], fact_generation[date_key] ) ),
+			    COUNTROWS ( dim_date ) * [Zones]
+			)
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Generation
+		lineageTag: c7d1e2f3-0108-4a5b-8c6d-000000000108
+
+	/// Wind generation per person per year (average over the selected years); only country-years with at least
+	/// 95 % of days covered by generation data count (as Load per Capita). Stands in for installed wind capacity
+	measure 'Wind per Capita (kWh)' =
+			
+			AVERAGEX (
+			    VALUES ( dim_date[year] ),
+			    VAR _complete =
+			        FILTER (
+			            ADDCOLUMNS (
+			                VALUES ( dim_bidding_zone[country_code] ),
+			                "@cov", [Generation Coverage %],
+			                "@gen", [Wind Generation (MWh)],
+			                "@pop", [Population]
+			            ),
+			            [@cov] >= 0.95
+			        )
+			    RETURN
+			        DIVIDE ( SUMX ( _complete, [@gen] + 0 ) * 1000, SUMX ( _complete, [@pop] ) )
+			)
+		formatString: #,0
+		displayFolder: Wind
+		lineageTag: c7d1e2f3-0109-4a5b-8c6d-000000000109
+
+	/// Median average wind speed of the countries in the quadrant chart (all countries with a value, slicer years)
+	measure 'Wind Speed Median (km/h)' =
+			
+			MEDIANX (
+			    FILTER ( ALL ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Wind per Capita (kWh)] ) ),
+			    [Avg Wind Speed (km/h)]
+			)
+		formatString: 0.0
+		displayFolder: Wind\Potential
+		lineageTag: c7d1e2f3-0110-4a5b-8c6d-000000000110
+
+	measure 'Wind per Capita Median (kWh)' =
+			
+			MEDIANX (
+			    FILTER ( ALL ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Wind per Capita (kWh)] ) ),
+			    [Wind per Capita (kWh)]
+			)
+		formatString: #,0
+		displayFolder: Wind\Potential
+		lineageTag: c7d1e2f3-0111-4a5b-8c6d-000000000111
+
+	/// "Yes" = room to grow: windier than the median country, but less wind generation per person than the median
+	measure 'Wind Room to Grow' =
+			
+			VAR _p = [Wind per Capita (kWh)]
+			RETURN
+			    IF (
+			        HASONEVALUE ( dim_bidding_zone[country_name] ) && NOT ISBLANK ( _p )
+			            && [Avg Wind Speed (km/h)] > [Wind Speed Median (km/h)]
+			            && _p < [Wind per Capita Median (kWh)],
+			        "Yes"
+			    )
+		displayFolder: Wind\Potential
+		lineageTag: c7d1e2f3-0112-4a5b-8c6d-000000000112
+
+	/// Bubble colour in the quadrant chart: orange = room to grow, navy = all others
+	measure 'Wind Potential Colour' = IF ( [Wind Room to Grow] = "Yes", "#E07B00", "#0E2A5C" )
+		displayFolder: Wind\Potential
+		lineageTag: c7d1e2f3-0113-4a5b-8c6d-000000000113
+
+	/// Hours with a known wind direction (wind rose: share of hours per direction and speed band)
+	measure 'Wind Hours' = COUNT ( fact_load[wind_direction_deg] )
+		formatString: #,0
+		displayFolder: Wind\Direction
+		lineageTag: c7d1e2f3-0114-4a5b-8c6d-000000000114
+
+	/// Average wind direction, 0–359° (where the wind comes from): circular mean of the hourly directions
+	/// (unit vectors), so 350° and 10° average to 0°, not 180°
+	measure 'Wind Direction (°)' =
+			
+			VAR _t =
+			    ADDCOLUMNS (
+			        FILTER ( VALUES ( fact_load[wind_direction_deg] ), NOT ISBLANK ( fact_load[wind_direction_deg] ) ),
+			        "@n", CALCULATE ( COUNTROWS ( fact_load ) )
+			    )
+			VAR _s = SUMX ( _t, [@n] * SIN ( RADIANS ( fact_load[wind_direction_deg] ) ) )
+			VAR _c = SUMX ( _t, [@n] * COS ( RADIANS ( fact_load[wind_direction_deg] ) ) )
+			VAR _a =
+			    SWITCH (
+			        TRUE (),
+			        _c > 0, ATAN ( _s / _c ),
+			        _c < 0, ATAN ( _s / _c ) + PI (),
+			        _s > 0, PI () / 2,
+			        _s < 0, -PI () / 2
+			    )
+			RETURN
+			    IF ( NOT ISBLANK ( _a ), MOD ( ROUND ( DEGREES ( _a ), 0 ) + 360, 360 ) )
+		formatString: 0
+		displayFolder: Wind\Direction
+		lineageTag: c7d1e2f3-0115-4a5b-8c6d-000000000115
+
+	/// Card: average wind direction as compass point and degrees, e.g. "SW · 233°"
+	measure 'Average Wind Direction' =
+			
+			VAR _d = [Wind Direction (°)]
+			RETURN
+			    IF (
+			        NOT ISBLANK ( _d ),
+			        PATHITEM ( "N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW", MOD ( ROUND ( _d / 22.5, 0 ), 16 ) + 1 )
+			            & " · " & FORMAT ( _d, "0" ) & "°"
+			    )
+		displayFolder: Wind\Direction
+		lineageTag: c7d1e2f3-0116-4a5b-8c6d-000000000116
+
+	/// Wind page: daily wind output vs wind speed
+	measure 'Title Wind Scatter' =
+			
+			VAR _r = [Wind Output Correlation (r)]
+			VAR _k = [Wind GWh per km/h]
+			VAR _rText = " (r = " & FORMAT ( _r, "0.00" ) & ")"
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        NOT ( [Wind Generation (MWh)] > 0 ), "No wind generation for this selection",
+			        ISBLANK ( _r ), "Daily wind output and wind speed",
+			        _r >= 0.5,
+			            "Windier days mean more wind power" & _rText & ": about +"
+			                & IF ( _k < 1, FORMAT ( _k * 1000, "#,0" ) & " MWh", FORMAT ( _k, IF ( _k < 10, "#,0.0", "#,0" ) ) & " GWh" )
+			                & " per day for each extra km/h",
+			        _r >= 0.3, "Wind output rises moderately with wind speed" & _rText,
+			        "Wind output follows the measured wind speed only weakly" & _rText
+			    )
+		displayFolder: Titles
+		lineageTag: c7d1e2f3-0117-4a5b-8c6d-000000000117
+
+	/// Wind page: countries with room to grow (or the position of a single selected country)
+	measure 'Title Wind Potential' =
+			
+			VAR _withValue = FILTER ( VALUES ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Wind per Capita (kWh)] ) )
+			VAR _grow = FILTER ( _withValue, [Wind Room to Grow] = "Yes" )
+			VAR _n = COUNTROWS ( _grow )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        COUNTROWS ( _withValue ) = 0, "Wind resource and wind use per country",
+			        COUNTROWS ( _withValue ) = 1,
+			            MAXX ( _withValue, dim_bidding_zone[country_name] ) & ": " & FORMAT ( [Avg Wind Speed (km/h)], "0.0" )
+			                & " km/h wind (median " & FORMAT ( [Wind Speed Median (km/h)], "0.0" ) & "), "
+			                & FORMAT ( [Wind per Capita (kWh)], "#,0" ) & " kWh wind power per person (median "
+			                & FORMAT ( [Wind per Capita Median (kWh)], "#,0" ) & ")",
+			        _n = 0, "No country is windier than the median while producing less wind power per person",
+			        "Room to grow: " & CONCATENATEX ( _grow, dim_bidding_zone[country_name], ", ", [Avg Wind Speed (km/h)], DESC )
+			            & IF ( _n = 1, " is", " are" ) & " windier than the median country but produce"
+			            & IF ( _n = 1, "s", "" ) & " less wind power per person"
+			    )
+		displayFolder: Titles
+		lineageTag: c7d1e2f3-0118-4a5b-8c6d-000000000118
+
+	/// Wind page: most frequent and strongest wind direction
+	measure 'Title Wind Rose' =
+			
+			VAR _names =
+			    "north|north-northeast|northeast|east-northeast|east|east-southeast|southeast|south-southeast|south|south-southwest|southwest|west-southwest|west|west-northwest|northwest|north-northwest"
+			VAR _sectors =
+			    ADDCOLUMNS (
+			        FILTER ( VALUES ( fact_load[Wind Sector No] ), NOT ISBLANK ( fact_load[Wind Sector No] ) ),
+			        "@n", [Wind Hours],
+			        "@v", [Avg Wind Speed (km/h)]
+			    )
+			VAR _often = TOPN ( 1, _sectors, [@n], DESC )
+			VAR _strong = TOPN ( 1, _sectors, [@v], DESC )
+			VAR _oftenNo = MAXX ( _often, fact_load[Wind Sector No] )
+			VAR _strongNo = MAXX ( _strong, fact_load[Wind Sector No] )
+			RETURN
+			    IF (
+			        ISBLANK ( _oftenNo ),
+			        "Where the wind comes from",
+			        "Wind mostly from the " & PATHITEM ( _names, _oftenNo + 1 ) & " ("
+			            & FORMAT ( DIVIDE ( MAXX ( _often, [@n] ), [Wind Hours] ), "0 %" ) & " of hours)"
+			            & IF (
+			                _strongNo = _oftenNo,
+			                ", also the strongest",
+			                "; strongest from the " & PATHITEM ( _names, _strongNo + 1 )
+			            )
+			            & " (" & FORMAT ( MAXX ( _strong, [@v] ), "0.0" ) & " km/h)"
+			    )
+		displayFolder: Titles
+		lineageTag: c7d1e2f3-0119-4a5b-8c6d-000000000119
+
+	/// Solar (B16)
+	measure 'Solar Generation (MWh)' =
+			
+			CALCULATE ( [Generation (MWh)], dim_generation_type[entsoe_code] = "B16" )
+		formatString: #,0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0201-4b6c-9d7e-000000000201
+
+	measure 'Solar Generation (TWh)' = DIVIDE ( [Solar Generation (MWh)], 1000000 )
+		formatString: #,0.0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0202-4b6c-9d7e-000000000202
+
+	measure 'Solar Generation (GWh)' = DIVIDE ( [Solar Generation (MWh)], 1000 )
+		formatString: #,0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0203-4b6c-9d7e-000000000203
+
+	measure 'Solar Share %' =
+			
+			DIVIDE ( [Solar Generation (MWh)], CALCULATE ( [Generation (MWh)], REMOVEFILTERS ( dim_generation_type ) ) )
+		formatString: 0.0\ %;-0.0\ %;0.0\ %
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0204-4b6c-9d7e-000000000204
+
+	/// Change of solar generation from the first to the last selected year; with one year selected: against the
+	/// previous year. Blank when the first year has no solar data (e.g. Cyprus 2023)
+	measure 'Solar Growth %' =
+			
+			VAR _y2 = MAX ( dim_date[year] )
+			VAR _y1 = IF ( MIN ( dim_date[year] ) = _y2, _y2 - 1, MIN ( dim_date[year] ) )
+			VAR _first = CALCULATE ( [Solar Generation (MWh)], REMOVEFILTERS ( dim_date ), dim_date[year] = _y1 )
+			VAR _last = CALCULATE ( [Solar Generation (MWh)], REMOVEFILTERS ( dim_date ), dim_date[year] = _y2 )
+			RETURN
+			    IF ( _first > 0 && _last > 0, DIVIDE ( _last, _first ) - 1 )
+		formatString: +0\ %;-0\ %;0\ %
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0205-4b6c-9d7e-000000000205
+
+	/// Pearson correlation between daily average solar radiation and daily solar generation
+	measure 'Solar Output Correlation (r)' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Solar Radiation (W/m²)], "@y", [Solar Generation (MWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			VAR _sxy = SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) )
+			VAR _sxx = SUMX ( _days, ( [@x] - _mx ) ^ 2 )
+			VAR _syy = SUMX ( _days, ( [@y] - _my ) ^ 2 )
+			RETURN
+			    DIVIDE ( _sxy, SQRT ( _sxx * _syy ) )
+		formatString: 0.00
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0206-4b6c-9d7e-000000000206
+
+	/// Linear fit of daily solar generation on daily average radiation: GWh per day for each extra 10 W/m²
+	measure 'Solar GWh per 10 W/m²' =
+			
+			VAR _days =
+			    FILTER (
+			        ADDCOLUMNS ( VALUES ( dim_date[full_date] ), "@x", [Avg Solar Radiation (W/m²)], "@y", [Solar Generation (GWh)] ),
+			        NOT ISBLANK ( [@x] ) && NOT ISBLANK ( [@y] )
+			    )
+			VAR _mx = AVERAGEX ( _days, [@x] )
+			VAR _my = AVERAGEX ( _days, [@y] )
+			RETURN
+			    10 * DIVIDE ( SUMX ( _days, ( [@x] - _mx ) * ( [@y] - _my ) ), SUMX ( _days, ( [@x] - _mx ) ^ 2 ) )
+		formatString: #,0.0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0207-4b6c-9d7e-000000000207
+
+	/// Solar generation per person per year (average over the selected years); only country-years with at least
+	/// 95 % of days covered by generation data count. Stands in for installed solar capacity
+	measure 'Solar per Capita (kWh)' =
+			
+			AVERAGEX (
+			    VALUES ( dim_date[year] ),
+			    VAR _complete =
+			        FILTER (
+			            ADDCOLUMNS (
+			                VALUES ( dim_bidding_zone[country_code] ),
+			                "@cov", [Generation Coverage %],
+			                "@gen", [Solar Generation (MWh)],
+			                "@pop", [Population]
+			            ),
+			            [@cov] >= 0.95
+			        )
+			    RETURN
+			        DIVIDE ( SUMX ( _complete, [@gen] + 0 ) * 1000, SUMX ( _complete, [@pop] ) )
+			)
+		formatString: #,0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0208-4b6c-9d7e-000000000208
+
+	/// Median average radiation of the countries in the quadrant chart (all countries with a value, slicer years)
+	measure 'Radiation Median (W/m²)' =
+			
+			MEDIANX (
+			    FILTER ( ALL ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Solar per Capita (kWh)] ) ),
+			    [Avg Solar Radiation (W/m²)]
+			)
+		formatString: #,0
+		displayFolder: Solar\Potential
+		lineageTag: d8e2f3a4-0209-4b6c-9d7e-000000000209
+
+	measure 'Solar per Capita Median (kWh)' =
+			
+			MEDIANX (
+			    FILTER ( ALL ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Solar per Capita (kWh)] ) ),
+			    [Solar per Capita (kWh)]
+			)
+		formatString: #,0
+		displayFolder: Solar\Potential
+		lineageTag: d8e2f3a4-0210-4b6c-9d7e-000000000210
+
+	/// "Yes" = room to grow: sunnier than the median country, but less solar generation per person than the median
+	measure 'Solar Room to Grow' =
+			
+			VAR _p = [Solar per Capita (kWh)]
+			RETURN
+			    IF (
+			        HASONEVALUE ( dim_bidding_zone[country_name] ) && NOT ISBLANK ( _p )
+			            && [Avg Solar Radiation (W/m²)] > [Radiation Median (W/m²)]
+			            && _p < [Solar per Capita Median (kWh)],
+			        "Yes"
+			    )
+		displayFolder: Solar\Potential
+		lineageTag: d8e2f3a4-0211-4b6c-9d7e-000000000211
+
+	/// Bubble colour in the quadrant chart: orange = room to grow, navy = all others
+	measure 'Solar Potential Colour' = IF ( [Solar Room to Grow] = "Yes", "#E07B00", "#0E2A5C" )
+		displayFolder: Solar\Potential
+		lineageTag: d8e2f3a4-0212-4b6c-9d7e-000000000212
+
+	/// Average solar generation per hour of the selection, GW (with an hour on the axis: the average of that hour)
+	measure 'Average Solar Generation (GW)' =
+			
+			DIVIDE (
+			    AVERAGEX ( CROSSJOIN ( VALUES ( dim_date[date_key] ), VALUES ( dim_time[time_key] ) ), [Solar Generation (MWh)] ),
+			    1000
+			)
+		formatString: #,0.0
+		displayFolder: Solar
+		lineageTag: d8e2f3a4-0213-4b6c-9d7e-000000000213
+
+	/// Solar page: daily solar output vs radiation
+	measure 'Title Solar Scatter' =
+			
+			VAR _r = [Solar Output Correlation (r)]
+			VAR _k = [Solar GWh per 10 W/m²]
+			VAR _rText = " (r = " & FORMAT ( _r, "0.00" ) & ")"
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        NOT ( [Solar Generation (MWh)] > 0 ), "No solar generation for this selection",
+			        ISBLANK ( _r ), "Daily solar output and solar radiation",
+			        _r >= 0.5,
+			            "Sunnier days mean more solar power" & _rText & ": about +"
+			                & IF ( _k < 1, FORMAT ( _k * 1000, "#,0" ) & " MWh", FORMAT ( _k, IF ( _k < 10, "#,0.0", "#,0" ) ) & " GWh" )
+			                & " per day for each extra 10 W/m²",
+			        _r >= 0.3, "Solar output rises moderately with radiation" & _rText,
+			        "Solar output follows the measured radiation only weakly" & _rText
+			    )
+		displayFolder: Titles
+		lineageTag: d8e2f3a4-0214-4b6c-9d7e-000000000214
+
+	/// Solar page: countries with room to grow (or the position of a single selected country)
+	measure 'Title Solar Potential' =
+			
+			VAR _withValue = FILTER ( VALUES ( dim_bidding_zone[country_name] ), NOT ISBLANK ( [Solar per Capita (kWh)] ) )
+			VAR _grow = FILTER ( _withValue, [Solar Room to Grow] = "Yes" )
+			VAR _n = COUNTROWS ( _grow )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        COUNTROWS ( _withValue ) = 0, "Solar resource and solar use per country",
+			        COUNTROWS ( _withValue ) = 1,
+			            MAXX ( _withValue, dim_bidding_zone[country_name] ) & ": " & FORMAT ( [Avg Solar Radiation (W/m²)], "#,0" )
+			                & " W/m² sun (median " & FORMAT ( [Radiation Median (W/m²)], "#,0" ) & "), "
+			                & FORMAT ( [Solar per Capita (kWh)], "#,0" ) & " kWh solar power per person (median "
+			                & FORMAT ( [Solar per Capita Median (kWh)], "#,0" ) & ")",
+			        _n = 0, "No country is sunnier than the median while producing less solar power per person",
+			        "Room to grow: " & CONCATENATEX ( _grow, dim_bidding_zone[country_name], ", ", [Avg Solar Radiation (W/m²)], DESC )
+			            & IF ( _n = 1, " is", " are" ) & " sunnier than the median country but produce"
+			            & IF ( _n = 1, "s", "" ) & " less solar power per person"
+			    )
+		displayFolder: Titles
+		lineageTag: d8e2f3a4-0215-4b6c-9d7e-000000000215
+
+	/// Solar page: peak hour and how much more a summer peak hour delivers than a winter one
+	measure 'Title Solar Profile' =
+			
+			VAR _hours =
+			    ADDCOLUMNS ( VALUES ( dim_time[Hour (UTC)] ), "@gw", [Average Solar Generation (GW)] )
+			VAR _peak = TOPN ( 1, FILTER ( _hours, [@gw] > 0 ), [@gw], DESC )
+			VAR _peakHour = MAXX ( _peak, dim_time[Hour (UTC)] )
+			VAR _summer = CALCULATE ( [Average Solar Generation (GW)], dim_time[Hour (UTC)] = _peakHour, dim_date[season] = "Summer" )
+			VAR _winter = CALCULATE ( [Average Solar Generation (GW)], dim_time[Hour (UTC)] = _peakHour, dim_date[season] = "Winter" )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        ISBLANK ( _peakHour ), "Average solar output by hour of day (UTC) and season",
+			        _winter > 0 && _summer > 0,
+			            "Solar peaks at " & _peakHour & " UTC; a summer midday delivers " & FORMAT ( DIVIDE ( _summer, _winter ), "0.0" )
+			                & "× the winter output",
+			        "Solar peaks at " & _peakHour & " UTC"
+			    )
+		displayFolder: Titles
+		lineageTag: d8e2f3a4-0216-4b6c-9d7e-000000000216
+
 	partition _Measures = m
 		mode: import
 		source =

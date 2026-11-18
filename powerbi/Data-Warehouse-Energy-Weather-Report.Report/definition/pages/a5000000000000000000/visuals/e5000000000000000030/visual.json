@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "e5000000000000000030",
+  "position": {
+    "x": 24,
+    "y": 990,
+    "z": 30000,
+    "height": 70,
+    "width": 1872,
+    "tabOrder": 30000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "Sources: ENTSO-E (wind onshore + offshore generation), Open-Meteo (wind 10 m above ground at each country's cities), Eurostat (population). City wind shows how windy a country is, not wind at turbine height or offshore. Output per person stands in for installed capacity (not in the warehouse), so \"room to grow\" is a pointer, not a verdict. Only country-years with at least 95 % of days covered count (Cyprus: none). Ireland = all-island market. Bulgaria and Malta are excluded.",
+                    "textStyle": {
+                      "fontSize": "13pt",
+                      "color": "#605e5c"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

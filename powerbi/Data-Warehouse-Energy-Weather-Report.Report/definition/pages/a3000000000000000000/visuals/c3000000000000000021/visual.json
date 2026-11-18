@@ -4,10 +4,10 @@
   "position": {
     "x": 23.940886699507388,
     "y": 645.07389162561572,
-    "z": 10,
+    "z": 10000,
     "height": 344.48275862068965,
     "width": 619.80295566502457,
-    "tabOrder": 10
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "tableEx",
@@ -171,6 +171,22 @@
                 }
               }
             }
+          }
+        }
+      ],
+      "columnWidth": [
+        {
+          "properties": {
+            "value": {
+              "expr": {
+                "Literal": {
+                  "Value": "60.6403947285105D"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Measures.Top 10 Share %"
           }
         }
       ]

@@ -148,5 +148,8 @@
         "isHiddenInViewMode": true
       }
     ]
-  }
+  },
+  "publicCustomVisuals": [
+    "deneb7E15AEF80B9E4D4F8E12924291ECE89A"
+  ]
 }
