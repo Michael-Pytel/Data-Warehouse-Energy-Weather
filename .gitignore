@@ -29,6 +29,9 @@ ssis/obj/
 *.pbix
 **/.pbi/cache.abf
 **/.pbi/localSettings.json
+# PDF exports of the report (local copies)
+/Data-Warehouse-Energy-Weather-Report.pdf
+/Energy & Weather Data Platform.pdf
 
 # Local working notes (kept out of the repo)
 CLAUDE.md
