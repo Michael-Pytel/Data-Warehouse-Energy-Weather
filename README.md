@@ -2,7 +2,7 @@
 
 A data warehouse that combines European electricity data, weather and socio-economic indicators for
 **all 27 EU countries**, hour by hour, in SQL Server, with a four-page Power BI report on top
-(see [Power BI report](#power-bi-report)).
+(see [Power BI report](#power-bi-report))..
 
 | Source | What | Grain |
 |---|---|---|
