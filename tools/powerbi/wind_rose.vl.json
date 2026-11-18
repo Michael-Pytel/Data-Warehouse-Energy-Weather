@@ -1,0 +1,424 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Wind rose: share of hours the wind came from each of 16 directions, stacked by wind speed band",
+  "data": {
+    "name": "dataset"
+  },
+  "width": "container",
+  "height": "container",
+  "padding": {
+    "top": 4,
+    "bottom": 4,
+    "left": 4,
+    "right": 4
+  },
+  "params": [
+    {
+      "name": "R",
+      "expr": "max(20, min(width - 150, height) / 2 - 20)"
+    },
+    {
+      "name": "cx",
+      "expr": "150 + (width - 150) / 2"
+    },
+    {
+      "name": "cy",
+      "expr": "height / 2"
+    }
+  ],
+  "transform": [
+    {
+      "filter": "isValid(datum['Wind Sector No']) && isValid(datum['Wind Speed Band No'])"
+    },
+    {
+      "joinaggregate": [
+        {
+          "op": "sum",
+          "field": "Wind Hours",
+          "as": "total"
+        }
+      ]
+    },
+    {
+      "calculate": "datum['Wind Hours'] / datum.total",
+      "as": "share"
+    },
+    {
+      "joinaggregate": [
+        {
+          "op": "sum",
+          "field": "share",
+          "as": "sectorShare"
+        }
+      ],
+      "groupby": [
+        "Wind Sector No"
+      ]
+    },
+    {
+      "joinaggregate": [
+        {
+          "op": "max",
+          "field": "sectorShare",
+          "as": "maxShare"
+        }
+      ]
+    }
+  ],
+  "layer": [
+    {
+      "description": "rings at round shares of hours",
+      "transform": [
+        {
+          "aggregate": [
+            {
+              "op": "max",
+              "field": "maxShare",
+              "as": "m"
+            }
+          ]
+        },
+        {
+          "calculate": "datum.m <= 0.1 ? 0.02 : datum.m <= 0.25 ? 0.05 : 0.1",
+          "as": "step"
+        },
+        {
+          "calculate": "sequence(datum.step, datum.m + 0.000001, datum.step)",
+          "as": "level"
+        },
+        {
+          "flatten": [
+            "level"
+          ]
+        },
+        {
+          "calculate": "datum.level / datum.m * R",
+          "as": "r"
+        }
+      ],
+      "mark": {
+        "type": "arc",
+        "fill": null,
+        "stroke": "#D5DCE8",
+        "strokeWidth": 1,
+        "x": {
+          "expr": "cx"
+        },
+        "y": {
+          "expr": "cy"
+        },
+        "theta": 0,
+        "theta2": 6.2832
+      },
+      "encoding": {
+        "radius": {
+          "field": "r",
+          "type": "quantitative",
+          "scale": null,
+          "stack": null
+        }
+      }
+    },
+    {
+      "description": "wedges: one per direction and speed band, stacked outwards from the slowest band",
+      "transform": [
+        {
+          "stack": "share",
+          "groupby": [
+            "Wind Sector No"
+          ],
+          "sort": [
+            {
+              "field": "Wind Speed Band No",
+              "order": "ascending"
+            }
+          ],
+          "as": [
+            "s0",
+            "s1"
+          ]
+        },
+        {
+          "calculate": "(datum['Wind Sector No'] - 0.44) * PI / 8",
+          "as": "a0"
+        },
+        {
+          "calculate": "(datum['Wind Sector No'] + 0.44) * PI / 8",
+          "as": "a1"
+        },
+        {
+          "calculate": "datum.s0 / datum.maxShare * R",
+          "as": "r0"
+        },
+        {
+          "calculate": "datum.s1 / datum.maxShare * R",
+          "as": "r1"
+        }
+      ],
+      "mark": {
+        "type": "arc",
+        "stroke": "#FFFFFF",
+        "strokeWidth": 0.5,
+        "x": {
+          "expr": "cx"
+        },
+        "y": {
+          "expr": "cy"
+        }
+      },
+      "encoding": {
+        "theta": {
+          "field": "a0",
+          "type": "quantitative",
+          "scale": null
+        },
+        "theta2": {
+          "field": "a1"
+        },
+        "radius": {
+          "field": "r1",
+          "type": "quantitative",
+          "scale": null
+        },
+        "radius2": {
+          "field": "r0"
+        },
+        "color": {
+          "field": "Wind Speed Band",
+          "type": "nominal",
+          "scale": {
+            "domain": [
+              "Below 10 km/h",
+              "10–20 km/h",
+              "20–30 km/h",
+              "30 km/h and more"
+            ],
+            "range": [
+              "#BFD3F2",
+              "#6F93C9",
+              "#2F5597",
+              "#0E2A5C"
+            ]
+          },
+          "legend": {
+            "title": "Wind speed",
+            "orient": "top-left",
+            "titleColor": "#5B6B82",
+            "labelColor": "#252423",
+            "titleFontSize": 11,
+            "labelFontSize": 11,
+            "symbolType": "square"
+          }
+        },
+        "tooltip": [
+          {
+            "field": "Wind Sector",
+            "title": "Wind from"
+          },
+          {
+            "field": "Wind Speed Band",
+            "title": "Wind speed"
+          },
+          {
+            "field": "share",
+            "title": "Share of hours",
+            "format": ".1%"
+          },
+          {
+            "field": "sectorShare",
+            "title": "All speeds from this direction",
+            "format": ".1%"
+          }
+        ]
+      }
+    },
+    {
+      "description": "ring labels (white halo, then text)",
+      "layer": [
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "max",
+                  "field": "maxShare",
+                  "as": "m"
+                }
+              ]
+            },
+            {
+              "calculate": "datum.m <= 0.1 ? 0.02 : datum.m <= 0.25 ? 0.05 : 0.1",
+              "as": "step"
+            },
+            {
+              "calculate": "sequence(datum.step, datum.m + 0.000001, datum.step)",
+              "as": "level"
+            },
+            {
+              "flatten": [
+                "level"
+              ]
+            },
+            {
+              "calculate": "datum.level / datum.m * R",
+              "as": "r"
+            },
+            {
+              "calculate": "cy - datum.r",
+              "as": "yy"
+            },
+            {
+              "calculate": "format(datum.level, '.0%')",
+              "as": "label"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "fontSize": 10,
+            "color": "#5B6B82",
+            "align": "left",
+            "baseline": "bottom",
+            "dx": 3,
+            "x": {
+              "expr": "cx"
+            },
+            "stroke": "#FFFFFF",
+            "strokeWidth": 3,
+            "strokeJoin": "round"
+          },
+          "encoding": {
+            "y": {
+              "field": "yy",
+              "type": "quantitative",
+              "scale": null
+            },
+            "text": {
+              "field": "label"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "aggregate": [
+                {
+                  "op": "max",
+                  "field": "maxShare",
+                  "as": "m"
+                }
+              ]
+            },
+            {
+              "calculate": "datum.m <= 0.1 ? 0.02 : datum.m <= 0.25 ? 0.05 : 0.1",
+              "as": "step"
+            },
+            {
+              "calculate": "sequence(datum.step, datum.m + 0.000001, datum.step)",
+              "as": "level"
+            },
+            {
+              "flatten": [
+                "level"
+              ]
+            },
+            {
+              "calculate": "datum.level / datum.m * R",
+              "as": "r"
+            },
+            {
+              "calculate": "cy - datum.r",
+              "as": "yy"
+            },
+            {
+              "calculate": "format(datum.level, '.0%')",
+              "as": "label"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "fontSize": 10,
+            "color": "#5B6B82",
+            "align": "left",
+            "baseline": "bottom",
+            "dx": 3,
+            "x": {
+              "expr": "cx"
+            }
+          },
+          "encoding": {
+            "y": {
+              "field": "yy",
+              "type": "quantitative",
+              "scale": null
+            },
+            "text": {
+              "field": "label"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "description": "compass labels",
+      "data": {
+        "values": [
+          {
+            "t": "N",
+            "a": 0
+          },
+          {
+            "t": "E",
+            "a": 1.5708
+          },
+          {
+            "t": "S",
+            "a": 3.1416
+          },
+          {
+            "t": "W",
+            "a": 4.7124
+          }
+        ]
+      },
+      "transform": [
+        {
+          "calculate": "cx + (R + 11) * sin(datum.a)",
+          "as": "x"
+        },
+        {
+          "calculate": "cy - (R + 11) * cos(datum.a)",
+          "as": "y"
+        }
+      ],
+      "mark": {
+        "type": "text",
+        "fontSize": 12,
+        "fontWeight": "bold",
+        "color": "#0E2A5C",
+        "align": "center",
+        "baseline": "middle"
+      },
+      "encoding": {
+        "x": {
+          "field": "x",
+          "type": "quantitative",
+          "scale": null
+        },
+        "y": {
+          "field": "y",
+          "type": "quantitative",
+          "scale": null
+        },
+        "text": {
+          "field": "t"
+        }
+      }
+    }
+  ],
+  "config": {
+    "view": {
+      "stroke": null
+    },
+    "font": "Segoe UI"
+  }
+}
