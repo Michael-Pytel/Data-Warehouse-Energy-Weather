@@ -1,0 +1,75 @@
+---
+config:
+  layout: elk
+  elk:
+    nodePlacementStrategy: BRANDES_KOEPF
+---
+flowchart LR
+    subgraph SRC["Data sources (APIs)"]
+        ENTSOE["ENTSO-E Transparency Platform<br/>load · forecast · generation<br/>28 bidding zones"]
+        METEO["Open-Meteo archive API<br/>hourly historical weather<br/>89 cities"]
+        EURO["Eurostat API<br/>5 yearly indicators<br/>27 countries"]
+        REF["zones.py + holidays package<br/>bidding zones · public holidays"]
+    end
+
+    subgraph PY["Python extract (etl/)"]
+        P1["entsoe_client.py<br/>3-month chunks, 12 parallel,<br/>rate limit, retries"]
+        P2["open_meteo_client.py<br/>per city and year,<br/>paced to API limits"]
+        P3["eurostat_client.py<br/>JSON-stat, no fallbacks"]
+        P4["reference_loader.py"]
+    end
+
+    subgraph DW["SQL Server · EnergyWeatherDW"]
+        subgraph STG["Staging"]
+            S1[("staging_entso_*")]
+            S2[("staging_weather_data")]
+            S3[("staging_eurostat_raw")]
+            S4[("staging_bidding_zone<br/>ref_public_holiday")]
+        end
+        subgraph TSQL["T-SQL load procedures"]
+            V["vw_weather_country_hour<br/>country average per hour"]
+            LD["usp_load_dimensions<br/>dates · SCD Type 2"]
+            LF["usp_load_facts<br/>insert new · update changed"]
+        end
+        subgraph STAR["Galaxy schema"]
+            F1[("fact_load<br/>zone × hour")]
+            F2[("fact_generation<br/>zone × hour × type")]
+            D[("dim_date · dim_time<br/>dim_bidding_zone<br/>dim_socioeconomic_profile<br/>dim_generation_type<br/>dim_weather_condition")]
+        end
+        LOG[("etl_log<br/>run and step status")]
+    end
+
+    PBI["Power BI report"]
+    SSIS{{"SSIS package Main_ETL_Process.dtsx<br/>runs the 9 tasks in order"}}
+
+    ENTSOE --> P1 --> S1
+    METEO --> P2 --> S2
+    EURO --> P3 --> S3
+    REF --> P4 --> S4
+
+    S2 --> V --> LF
+    S1 --> LF
+    S3 --> LD
+    S4 --> LD
+    LD --> D
+    LF --> F1
+    LF --> F2
+    D --- F1
+    D --- F2
+    STAR --> PBI
+
+    SSIS -.-> PY
+    SSIS -.-> TSQL
+    PY -.-> LOG
+    TSQL -.-> LOG
+
+    %% Colours as in the original PNG: one pastel colour per layer, white nodes with dark outlines
+    style SRC fill:#FFF0FB,stroke:#E07BE0,color:#000000
+    style PY fill:#EDFDFB,stroke:#4FD1C5,color:#000000
+    style DW fill:#FFF5EB,stroke:#F0A050,color:#000000
+    style STG fill:#E8FDFF,stroke:#5CCFE0,color:#000000
+    style TSQL fill:#EEFBF0,stroke:#7FD69A,color:#000000
+    style STAR fill:#F3F2FF,stroke:#9B8CF0,color:#000000
+
+    classDef box fill:#FFFFFF,stroke:#1A1A1A,stroke-width:1.5px,color:#1A1A1A
+    class ENTSOE,METEO,EURO,REF,P1,P2,P3,P4,S1,S2,S3,S4,V,LD,LF,F1,F2,D,LOG,PBI,SSIS box

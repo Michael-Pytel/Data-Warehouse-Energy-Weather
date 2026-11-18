@@ -1,0 +1,104 @@
+erDiagram
+    direction LR
+
+    %% Layout, left to right (five columns):
+    %%   dim_weather_condition | fact_load | shared dimensions | fact_generation | dim_generation_type
+    %% Mermaid places the entity on the left of a relationship in the column before the one on the
+    %% right, so the order in which each relationship is written sets the columns.
+
+    dim_weather_condition ||--o{ fact_load : "weather_condition_key"
+
+    fact_load }o--|| dim_date : "date_key"
+    fact_load }o--|| dim_time : "time_key"
+    fact_load }o--|| dim_bidding_zone : "bidding_zone_key"
+    fact_load }o--|| dim_socioeconomic_profile : "socioeconomic_profile_key"
+
+    dim_date ||--o{ fact_generation : "date_key"
+    dim_time ||--o{ fact_generation : "time_key"
+    dim_bidding_zone ||--o{ fact_generation : "bidding_zone_key"
+    dim_socioeconomic_profile ||--o{ fact_generation : "socioeconomic_profile_key"
+
+    fact_generation }o--|| dim_generation_type : "generation_type_key"
+
+    fact_load {
+        int date_key PK, FK
+        tinyint time_key PK, FK
+        int bidding_zone_key PK, FK
+        int socioeconomic_profile_key FK
+        tinyint weather_condition_key FK
+        decimal actual_load_mwh
+        decimal forecast_load_mwh
+        decimal temperature_c
+        decimal wind_speed_kmh
+        smallint wind_direction_deg
+        decimal solar_radiation_wm2
+        decimal cloud_cover_pct
+        decimal heating_degree_hours
+        decimal cooling_degree_hours
+        nvarchar is_public_holiday
+    }
+
+    fact_generation {
+        int date_key PK, FK
+        tinyint time_key PK, FK
+        int bidding_zone_key PK, FK
+        tinyint generation_type_key PK, FK
+        int socioeconomic_profile_key FK
+        decimal generation_mwh
+        nvarchar is_public_holiday
+    }
+
+    dim_weather_condition {
+        tinyint weather_condition_key PK
+        nvarchar condition_name
+        nvarchar severity
+    }
+
+    dim_date {
+        int date_key PK "yyyymmdd"
+        date full_date
+        smallint year
+        tinyint month
+        nvarchar day_name
+        nvarchar is_weekend
+        nvarchar season
+    }
+
+    dim_time {
+        tinyint time_key PK "UTC hour 0-23"
+        char hour_label
+    }
+
+    dim_bidding_zone {
+        int bidding_zone_key PK
+        nvarchar bidding_zone_code "e.g. DK1"
+        nvarchar country_code
+        nvarchar country_name
+        nvarchar timezone
+    }
+
+    dim_socioeconomic_profile {
+        int socioeconomic_profile_key PK
+        nvarchar country_code
+        smallint year
+        bigint population
+        decimal gdp_per_capita_eur
+        decimal electricity_price_eur_kwh
+        decimal energy_intensity
+        decimal unemployment_rate_pct
+        nvarchar is_estimated
+    }
+
+    dim_generation_type {
+        tinyint generation_type_key PK
+        nvarchar entsoe_code "B01-B25"
+        nvarchar generation_type_name
+        nvarchar generation_category
+        nvarchar is_renewable
+        nvarchar is_intermittent
+    }
+
+    classDef fact fill:#F2A900,stroke:#B87F00,color:#0E2A5C
+    classDef dim fill:#0E2A5C,stroke:#0E2A5C,color:#FFFFFF
+    class fact_load,fact_generation fact
+    class dim_weather_condition,dim_date,dim_time,dim_bidding_zone,dim_socioeconomic_profile,dim_generation_type dim

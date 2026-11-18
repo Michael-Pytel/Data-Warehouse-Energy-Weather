@@ -1,0 +1,25 @@
+flowchart LR
+    SRC["<b>Data sources</b><br/><small>ENTSO-E · Open-Meteo · Eurostat</small>"]
+    PY["<b>Python extract</b><br/><small>rate limits · retries · parallel requests</small>"]
+    STG[("<b>Staging</b><br/><small>SQL Server</small>")]
+    TSQL["<b>T-SQL transform</b><br/><small>incremental · SCD Type 2</small>"]
+    DW[("<b>Galaxy schema</b><br/><small>2 fact tables · 6 dimensions</small>")]
+    PBI["<b>Power BI</b><br/><small>6 report pages</small>"]
+    SSIS{{"<b>SSIS</b><br/><small>runs the 9 steps</small>"}}
+    LOG[("<b>etl_log</b><br/><small>run and step status</small>")]
+
+    SRC --> PY --> STG --> TSQL --> DW --> PBI
+    SSIS -.-> PY
+    SSIS -.-> TSQL
+    PY -.-> LOG
+    TSQL -.-> LOG
+
+    %% Same colours per layer as the detailed diagram (docs/diagram/etl-pipeline.mmd)
+    style SRC fill:#FFF0FB,stroke:#E07BE0,color:#1A1A1A
+    style PY fill:#EDFDFB,stroke:#4FD1C5,color:#1A1A1A
+    style STG fill:#E8FDFF,stroke:#5CCFE0,color:#1A1A1A
+    style TSQL fill:#EEFBF0,stroke:#7FD69A,color:#1A1A1A
+    style DW fill:#F3F2FF,stroke:#9B8CF0,color:#1A1A1A
+    style LOG fill:#FFF5EB,stroke:#F0A050,color:#1A1A1A
+    style PBI fill:#FFFFFF,stroke:#1A1A1A,color:#1A1A1A
+    style SSIS fill:#FFFFFF,stroke:#1A1A1A,color:#1A1A1A

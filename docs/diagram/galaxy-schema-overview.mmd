@@ -1,0 +1,19 @@
+flowchart LR
+    WC["dim_weather_condition<br/><small>WMO-based condition</small>"]
+    FL["<b>fact_load</b><br/><small>zone × hour<br/>load · forecast · weather</small>"]
+    D1["dim_date<br/><small>day</small>"]
+    D2["dim_time<br/><small>UTC hour</small>"]
+    D3["dim_bidding_zone<br/><small>zone · SCD 2</small>"]
+    D4["dim_socioeconomic_profile<br/><small>country × year · SCD 2</small>"]
+    FG["<b>fact_generation</b><br/><small>zone × hour × production type<br/>generation</small>"]
+    GT["dim_generation_type<br/><small>production type</small>"]
+
+    WC --- FL
+    FL --- D1 & D2 & D3 & D4
+    D1 & D2 & D3 & D4 --- FG
+    FG --- GT
+
+    classDef fact fill:#F2A900,stroke:#B87F00,color:#0E2A5C
+    classDef dim fill:#0E2A5C,stroke:#0E2A5C,color:#FFFFFF
+    class FL,FG fact
+    class WC,D1,D2,D3,D4,GT dim
