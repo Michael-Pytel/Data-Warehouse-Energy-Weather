@@ -1,0 +1,105 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmark/1.4.0/schema.json",
+  "displayName": "Guide – Load & forecast (show)",
+  "name": "GuideShow_a20000",
+  "options": {
+    "targetVisualNames": [
+      "guide_a20000_veil",
+      "guide_a20000_panel",
+      "guide_a20000_title",
+      "guide_a20000_col1",
+      "guide_a20000_col2",
+      "guide_a20000_col3",
+      "guide_a20000_close",
+      "guide_a20000_badge1",
+      "guide_a20000_badge2",
+      "guide_a20000_badge3",
+      "guide_a20000_badge4",
+      "guide_a20000_badge5"
+    ],
+    "applyOnlyToTargetVisuals": true,
+    "suppressData": true
+  },
+  "explorationState": {
+    "version": "1.3",
+    "activeSection": "a2000000000000000000",
+    "sections": {
+      "a2000000000000000000": {
+        "visualContainers": {
+          "guide_a20000_veil": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_panel": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_title": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_col1": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_col2": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_col3": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_close": {
+            "singleVisual": {
+              "visualType": "actionButton",
+              "objects": {}
+            }
+          },
+          "guide_a20000_badge1": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_badge2": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_badge3": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_badge4": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          },
+          "guide_a20000_badge5": {
+            "singleVisual": {
+              "visualType": "textbox",
+              "objects": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/bookmarksMetadata/1.0.0/schema.json",
+  "items": [
+    {
+      "name": "Guide",
+      "displayName": "Guide",
+      "children": [
+        "GuideShow_b2aba7",
+        "GuideHide_b2aba7",
+        "GuideShow_a20000",
+        "GuideHide_a20000",
+        "GuideShow_a30000",
+        "GuideHide_a30000",
+        "GuideShow_a50000",
+        "GuideHide_a50000",
+        "GuideShow_a60000",
+        "GuideHide_a60000",
+        "GuideShow_a40000",
+        "GuideHide_a40000"
+      ]
+    }
+  ]
+}
